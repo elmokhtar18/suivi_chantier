@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+database/suivi_chantier.db
+streamlit_log.txt
+.streamlit/secrets.toml
