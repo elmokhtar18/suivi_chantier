@@ -9,16 +9,29 @@ import plotly.express as px
 import streamlit as st
 
 from database import database as db
-from utils.helpers import ACCENT, ACCENT_2, CATEGORICAL, CURRENCY, SEQUENTIAL_BLUE, inject_custom_css, section_title, style_fig
+from utils.helpers import (
+    ACCENT,
+    ACCENT_2,
+    CATEGORICAL,
+    CURRENCY,
+    SEQUENTIAL_BLUE,
+    bottom_nav_mobile,
+    inject_custom_css,
+    inject_pwa_head,
+    section_title,
+    style_fig,
+)
 
 st.set_page_config(page_title="Statistiques - Suivi de Chantier", page_icon="📊", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Statistiques du chantier", "📊")
 
 depenses = db.get_depenses()
 if not depenses:
     st.info("Aucune dépense enregistrée pour le moment : les statistiques apparaîtront ici dès la première dépense.")
+    bottom_nav_mobile()
     st.stop()
 
 df = pd.DataFrame(depenses)
@@ -118,6 +131,23 @@ with col4:
 st.divider()
 
 # ---------------------------------------------------------------------------
+# Top 10 des dépenses les plus élevées
+# ---------------------------------------------------------------------------
+section_title("Top 10 des dépenses les plus élevées", "🏆")
+df_top10 = df.nlargest(10, "montant_total")[["designation", "montant_total", "date", "categorie_nom"]].copy()
+df_top10["etiquette"] = df_top10["designation"].fillna("").str.slice(0, 35) + " (" + df_top10["date"].dt.strftime("%d/%m/%Y") + ")"
+fig_top10 = px.bar(
+    df_top10.sort_values("montant_total"), x="montant_total", y="etiquette", orientation="h",
+    text="montant_total", color="montant_total", color_continuous_scale=SEQUENTIAL_BLUE,
+    labels={"montant_total": f"Montant ({CURRENCY})", "etiquette": "Dépense"},
+)
+fig_top10.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+style_fig(fig_top10, coloraxis_showscale=False, height=420, margin=dict(l=10, r=10, t=10, b=10))
+st.plotly_chart(fig_top10, width="stretch")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
 # Évolution dans le temps + courbe cumulative
 # ---------------------------------------------------------------------------
 section_title("Évolution des dépenses dans le temps", "📈")
@@ -133,6 +163,8 @@ st.plotly_chart(fig_evol, width="stretch")
 section_title("Courbe cumulative des dépenses", "📈")
 fig_cumul = px.area(df_jour, x="date", y="cumul",
                      labels={"date": "Date", "cumul": f"Total cumulé ({CURRENCY})"})
-fig_cumul.update_traces(line_color=ACCENT_2, fillcolor="rgba(139,92,246,0.22)")
+fig_cumul.update_traces(line_color=ACCENT_2, fillcolor="rgba(250,204,21,0.20)")
 style_fig(fig_cumul, height=350, margin=dict(l=10, r=10, t=10, b=10))
 st.plotly_chart(fig_cumul, width="stretch")
+
+bottom_nav_mobile()

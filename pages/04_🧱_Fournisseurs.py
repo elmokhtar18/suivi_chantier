@@ -13,14 +13,13 @@ import pandas as pd
 import streamlit as st
 
 from database import database as db
-from utils.helpers import confirm_delete, dette_badge, format_montant, inject_custom_css, section_title
+from utils.helpers import bottom_nav_mobile, MODES_PAIEMENT, confirm_delete, dette_badge, format_montant, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Fournisseurs - Suivi de Chantier", page_icon="🧱", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Gestion des fournisseurs", "🧱")
-
-MODES_PAIEMENT = ["Espèces", "Bankily", "Sedad", "Masrvi", "Chèque", "Virement", "Autre"]
 
 # ---------------------------------------------------------------------------
 # Ajout d'un fournisseur
@@ -157,3 +156,5 @@ else:
             f"le fournisseur « {f['nom']} »", key=f"fournisseur_{fid}",
             on_confirm=lambda: db.delete_fournisseur(fid),
         )
+
+bottom_nav_mobile()

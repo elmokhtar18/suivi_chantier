@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-database/suivi_chantier.db
+database/*.db
 streamlit_log.txt
+streamlit_err.txt
 .streamlit/secrets.toml
+data/justificatifs/
+.claude/

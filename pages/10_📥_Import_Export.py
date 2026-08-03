@@ -17,11 +17,12 @@ import streamlit as st
 from database import database as db
 from utils import excel_import
 from utils.exports import export_csv_bytes, export_excel_bytes, export_pdf_bytes
-from utils.helpers import inject_custom_css, section_title
+from utils.helpers import bottom_nav_mobile, bouton_partage_pdf, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Import / Export - Suivi de Chantier", page_icon="📥", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Importation d'un fichier Excel", "📥")
 
 st.caption(
@@ -147,8 +148,12 @@ for tab, dataframe, fichier_base, titre in _exports:
                 st.download_button("⬇️ Excel", export_excel_bytes(dataframe, titre),
                                     file_name=f"{fichier_base}.xlsx", width="stretch", key=f"xlsx_{fichier_base}")
             with e2:
-                st.download_button("⬇️ PDF", export_pdf_bytes(dataframe, titre),
+                _pdf_bytes = export_pdf_bytes(dataframe, titre)
+                st.download_button("⬇️ PDF", _pdf_bytes,
                                     file_name=f"{fichier_base}.pdf", width="stretch", key=f"pdf_{fichier_base}")
+                bouton_partage_pdf(_pdf_bytes, f"{fichier_base}.pdf", titre=titre)
             with e3:
                 st.download_button("⬇️ CSV", export_csv_bytes(dataframe),
                                     file_name=f"{fichier_base}.csv", width="stretch", key=f"csv_{fichier_base}")
+
+bottom_nav_mobile()

@@ -9,11 +9,12 @@ import plotly.express as px
 import streamlit as st
 
 from database import database as db
-from utils.helpers import SEQUENTIAL_BLUE, badge, confirm_delete, format_montant, inject_custom_css, section_title, style_fig
+from utils.helpers import bottom_nav_mobile, SEQUENTIAL_BLUE, badge, confirm_delete, format_montant, inject_custom_css, inject_pwa_head, section_title, style_fig
 
 st.set_page_config(page_title="Étapes - Suivi de Chantier", page_icon="🏗️", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Gestion des étapes du chantier", "🏗️")
 
 # ---------------------------------------------------------------------------
@@ -115,3 +116,5 @@ if etapes:
         st.caption("Les dépenses liées ne sont pas supprimées : elles n'ont simplement plus d'étape associée.")
 else:
     st.info("Aucune étape à modifier.")
+
+bottom_nav_mobile()

@@ -10,17 +10,27 @@ import streamlit as st
 
 from database import database as db
 from utils.exports import export_csv_bytes, export_excel_bytes, export_pdf_bytes
-from utils.helpers import format_montant, inject_custom_css, kpi_card, section_title
+from utils.helpers import (
+    bottom_nav_mobile,
+    bouton_partage_pdf,
+    format_montant,
+    inject_custom_css,
+    inject_pwa_head,
+    kpi_card,
+    section_title,
+)
 
 st.set_page_config(page_title="Paiements - Suivi de Chantier", page_icon="💳", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Historique des paiements", "💳")
 
 historique = db.get_historique_paiements()
 
 if not historique:
     st.info("Aucun paiement enregistré pour le moment.")
+    bottom_nav_mobile()
     st.stop()
 
 df = pd.DataFrame(historique)
@@ -68,8 +78,12 @@ with exp1:
     st.download_button("⬇️ Exporter en Excel", export_excel_bytes(df_affiche, "Paiements"),
                         file_name="historique_paiements.xlsx", width="stretch")
 with exp2:
-    st.download_button("⬇️ Exporter en PDF", export_pdf_bytes(df_affiche, "Historique des paiements"),
+    _pdf_paiements = export_pdf_bytes(df_affiche, "Historique des paiements")
+    st.download_button("⬇️ Exporter en PDF", _pdf_paiements,
                         file_name="historique_paiements.pdf", width="stretch")
+    bouton_partage_pdf(_pdf_paiements, "historique_paiements.pdf", titre="Historique des paiements")
 with exp3:
     st.download_button("⬇️ Exporter en CSV", export_csv_bytes(df_affiche),
                         file_name="historique_paiements.csv", width="stretch")
+
+bottom_nav_mobile()

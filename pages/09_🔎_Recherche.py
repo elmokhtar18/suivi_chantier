@@ -8,17 +8,19 @@ import pandas as pd
 import streamlit as st
 
 from database import database as db
-from utils.helpers import format_montant, inject_custom_css, section_title
+from utils.helpers import bottom_nav_mobile, format_montant, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Recherche - Suivi de Chantier", page_icon="🔎", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Recherche globale", "🔎")
 
 requete = st.text_input("🔎 Rechercher un fournisseur, un employé, une dépense, une facture, une étape...")
 
 if not requete or len(requete.strip()) < 2:
     st.info("Saisissez au moins 2 caractères pour lancer la recherche.")
+    bottom_nav_mobile()
     st.stop()
 
 q = requete.strip().lower()
@@ -86,3 +88,5 @@ if depenses:
     st.caption(f"Montant total des résultats : {format_montant(df_d['Montant'].sum())}")
 else:
     st.caption("Aucun résultat.")
+
+bottom_nav_mobile()

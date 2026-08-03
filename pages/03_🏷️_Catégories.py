@@ -13,11 +13,12 @@ import plotly.express as px
 import streamlit as st
 
 from database import database as db
-from utils.helpers import CATEGORICAL, confirm_delete, inject_custom_css, section_title, style_fig
+from utils.helpers import bottom_nav_mobile, CATEGORICAL, confirm_delete, inject_custom_css, inject_pwa_head, section_title, style_fig
 
 st.set_page_config(page_title="Catégories - Suivi de Chantier", page_icon="🏷️", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Gestion des catégories", "🏷️")
 
 # ---------------------------------------------------------------------------
@@ -92,3 +93,5 @@ if categories:
         st.caption("Les dépenses liées ne sont pas supprimées : elles n'ont simplement plus de catégorie associée.")
 else:
     st.info("Aucune catégorie à modifier.")
+
+bottom_nav_mobile()

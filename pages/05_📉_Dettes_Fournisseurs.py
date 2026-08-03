@@ -13,8 +13,10 @@ from database import database as db
 from utils.helpers import (
     CATEGORICAL,
     STATUS_CRITICAL,
+    bottom_nav_mobile,
     format_montant,
     inject_custom_css,
+    inject_pwa_head,
     kpi_card,
     kpi_hero,
     section_title,
@@ -26,12 +28,14 @@ DEBT_SEQUENTIAL = ["#5a1f1f", "#8f2f2f", STATUS_CRITICAL]
 st.set_page_config(page_title="Dettes Fournisseurs - Suivi de Chantier", page_icon="📉", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Dettes Fournisseurs", "📉")
 
 dettes = db.get_dettes_fournisseurs()
 
 if not dettes:
     st.info("Aucun fournisseur enregistré pour le moment.")
+    bottom_nav_mobile()
     st.stop()
 
 df = pd.DataFrame(dettes)
@@ -85,3 +89,5 @@ if not df_endettes.empty:
     st.plotly_chart(fig2, width="stretch")
 else:
     st.info("Pas de dette à répartir pour le moment.")
+
+bottom_nav_mobile()

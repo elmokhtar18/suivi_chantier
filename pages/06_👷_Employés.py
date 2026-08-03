@@ -16,11 +16,12 @@ import pandas as pd
 import streamlit as st
 
 from database import database as db
-from utils.helpers import confirm_delete, format_montant, inject_custom_css, section_title
+from utils.helpers import bottom_nav_mobile, confirm_delete, format_montant, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Employés - Suivi de Chantier", page_icon="👷", layout="wide")
 db.init_db()
 inject_custom_css()
+inject_pwa_head()
 section_title("Gestion des employés", "👷")
 
 # ---------------------------------------------------------------------------
@@ -166,3 +167,5 @@ else:
             f"l'employé « {e['nom']} »", key=f"employe_{eid}",
             on_confirm=lambda: db.delete_employe(eid),
         )
+
+bottom_nav_mobile()

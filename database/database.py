@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS depenses (
     mode_paiement   TEXT DEFAULT '',
     statut_paiement TEXT DEFAULT 'Payé',
     observation     TEXT DEFAULT '',
+    justificatif_path TEXT DEFAULT '',
     created_at      TEXT DEFAULT (datetime('now'))
 );
 
@@ -116,6 +117,18 @@ CREATE TABLE IF NOT EXISTS settings (
     key     TEXT PRIMARY KEY,
     value   TEXT
 );
+
+-- Abonnements aux notifications push navigateur (Web Push). Architecture
+-- prête pour de futures notifications serveur (budget dépassé, rappel...) —
+-- non activée : voir utils/notifications.py pour ce qu'il reste à câbler
+-- (clé VAPID, envoi via pywebpush, déclencheur planifié).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint        TEXT NOT NULL UNIQUE,
+    p256dh          TEXT NOT NULL,
+    auth            TEXT NOT NULL,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
 """
 
 # Séparés du schéma des tables : ces index portent sur `depenses.categorie_id`, qui
@@ -142,8 +155,6 @@ DEFAULT_ETAPES = [
 
 DEFAULT_CATEGORIES = ["Fer", "Ciment", "Brique", "Plomberie", "Électricité", "Employé", "Autres"]
 
-DEFAULT_MODES_PAIEMENT = ["Espèces", "Bankily", "Sedad", "Masrvi", "Chèque", "Virement", "Autre"]
-
 
 def init_db():
     """Crée les tables si nécessaire et insère les données de référence par défaut."""
@@ -166,6 +177,7 @@ def init_db():
             )
 
         _migrer_categorie_vers_fk(conn)
+        _migrer_justificatif_path(conn)
         conn.executescript(SCHEMA_INDEXES)
 
         if conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone() is None:
@@ -200,6 +212,15 @@ def _migrer_categorie_vers_fk(conn):
         conn.execute("UPDATE depenses SET categorie_id = ? WHERE id = ?", (cat_id, ligne["id"]))
 
     conn.execute("ALTER TABLE depenses DROP COLUMN categorie")
+
+
+def _migrer_justificatif_path(conn):
+    """Migration : ajoute `depenses.justificatif_path` (photo/scan de
+    justificatif pris depuis le mobile) sur une base créée avant cette
+    fonctionnalité. Idempotente."""
+    colonnes = {row["name"] for row in conn.execute("PRAGMA table_info(depenses)").fetchall()}
+    if "justificatif_path" not in colonnes:
+        conn.execute("ALTER TABLE depenses ADD COLUMN justificatif_path TEXT DEFAULT ''")
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +271,9 @@ def update_etape(etape_id, nom, description="", budget_alloue=0, ordre=0):
 
 
 def delete_etape(etape_id):
+    """Supprime l'étape. Les dépenses liées ne sont pas supprimées : `etape_id`
+    passe à NULL automatiquement (contrainte ON DELETE SET NULL du schéma)."""
     with get_connection() as conn:
-        conn.execute("UPDATE depenses SET etape_id = NULL WHERE etape_id = ?", (etape_id,))
         conn.execute("DELETE FROM etapes WHERE id = ?", (etape_id,))
 
 
@@ -323,8 +345,9 @@ def update_categorie(categorie_id, nom):
 
 
 def delete_categorie(categorie_id):
+    """Supprime la catégorie. Les dépenses liées ne sont pas supprimées :
+    `categorie_id` passe à NULL automatiquement (ON DELETE SET NULL)."""
     with get_connection() as conn:
-        conn.execute("UPDATE depenses SET categorie_id = NULL WHERE categorie_id = ?", (categorie_id,))
         conn.execute("DELETE FROM categories WHERE id = ?", (categorie_id,))
 
 
@@ -398,8 +421,9 @@ def update_fournisseur(fournisseur_id, nom, telephone="", adresse="", type_mater
 
 
 def delete_fournisseur(fournisseur_id):
+    """Supprime le fournisseur. Les dépenses liées ne sont pas supprimées :
+    `fournisseur_id` passe à NULL automatiquement (ON DELETE SET NULL)."""
     with get_connection() as conn:
-        conn.execute("UPDATE depenses SET fournisseur_id = NULL WHERE fournisseur_id = ?", (fournisseur_id,))
         conn.execute("DELETE FROM fournisseurs WHERE id = ?", (fournisseur_id,))
 
 
@@ -503,8 +527,9 @@ def update_employe(employe_id, nom, fonction="", telephone="", montant_du=0):
 
 
 def delete_employe(employe_id):
+    """Supprime l'employé. Les dépenses liées ne sont pas supprimées :
+    `employe_id` passe à NULL automatiquement (ON DELETE SET NULL)."""
     with get_connection() as conn:
-        conn.execute("UPDATE depenses SET employe_id = NULL WHERE employe_id = ?", (employe_id,))
         conn.execute("DELETE FROM employes WHERE id = ?", (employe_id,))
 
 
@@ -586,17 +611,22 @@ def get_depense(depense_id):
 
 
 def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
-                 quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation):
+                 quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+                 justificatif_path=""):
     """Ajoute une dépense et déclenche automatiquement le mouvement d'employé associé
-    si la dépense concerne un employé (catégorie 'Employé' + employé renseigné)."""
+    si la dépense concerne un employé (catégorie 'Employé' + employé renseigné).
+    `justificatif_path` est le chemin local (dans data/justificatifs/) d'une photo
+    ou d'un scan de facture pris/importé depuis le formulaire, facultatif."""
     with get_connection() as conn:
         cur = conn.execute(
             """INSERT INTO depenses
                (date, designation, categorie_id, etape_id, fournisseur_id, employe_id,
-                quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+                justificatif_path)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
-             quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation),
+             quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+             justificatif_path),
         )
         depense_id = cur.lastrowid
 
@@ -610,15 +640,18 @@ def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_i
 
 
 def update_depense(depense_id, date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
-                    quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation):
+                    quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+                    justificatif_path=""):
     with get_connection() as conn:
         conn.execute(
             """UPDATE depenses SET
                 date=?, designation=?, categorie_id=?, etape_id=?, fournisseur_id=?, employe_id=?,
-                quantite=?, prix_unitaire=?, montant_total=?, mode_paiement=?, statut_paiement=?, observation=?
+                quantite=?, prix_unitaire=?, montant_total=?, mode_paiement=?, statut_paiement=?, observation=?,
+                justificatif_path=?
                WHERE id=?""",
             (date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
-             quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation, depense_id),
+             quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+             justificatif_path, depense_id),
         )
         # Le mouvement employé lié est resynchronisé (montant/date/employé peuvent avoir changé)
         conn.execute("DELETE FROM mouvements_employes WHERE depense_id = ?", (depense_id,))
@@ -631,8 +664,16 @@ def update_depense(depense_id, date_depense, designation, categorie_id, etape_id
 
 
 def delete_depense(depense_id):
+    """Supprime la dépense et son éventuel fichier justificatif associé."""
     with get_connection() as conn:
+        row = conn.execute("SELECT justificatif_path FROM depenses WHERE id = ?", (depense_id,)).fetchone()
         conn.execute("DELETE FROM depenses WHERE id = ?", (depense_id,))
+
+    if row and row["justificatif_path"]:
+        try:
+            Path(row["justificatif_path"]).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +688,17 @@ def get_indicateurs_globaux():
         nb_employes = conn.execute("SELECT COUNT(*) FROM employes").fetchone()[0]
         budget_row = conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone()
         budget_global = float(budget_row[0]) if budget_row and budget_row[0] else 0
+
+        mois_courant = _today()[:7]     # "YYYY-MM"
+        annee_courante = _today()[:4]   # "YYYY"
+        depenses_mois_courant = conn.execute(
+            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE strftime('%Y-%m', date) = ?",
+            (mois_courant,),
+        ).fetchone()[0]
+        depenses_annee_courante = conn.execute(
+            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE strftime('%Y', date) = ?",
+            (annee_courante,),
+        ).fetchone()[0]
 
     dettes = get_dettes_fournisseurs()
     total_dettes = round(sum(d["dette_restante"] for d in dettes), 2)
@@ -664,6 +716,10 @@ def get_indicateurs_globaux():
         "total_achats_fournisseurs": total_achats_fournisseurs,
         "total_paye_fournisseurs": total_paye_fournisseurs,
         "montant_restant_a_payer": total_dettes,
+        "depenses_mois_courant": depenses_mois_courant,
+        "depenses_annee_courante": depenses_annee_courante,
+        "mois_courant": mois_courant,
+        "annee_courante": annee_courante,
     }
 
 

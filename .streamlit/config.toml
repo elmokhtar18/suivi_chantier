@@ -1,0 +1,15 @@
+[theme]
+base = "dark"
+primaryColor = "#eab308"
+backgroundColor = "#0b0c11"
+secondaryBackgroundColor = "#151720"
+textColor = "#f5f5f7"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Sert le dossier static/ (manifest, icônes, service worker) à l'URL
+# "app/static/..." — nécessaire pour la PWA (voir utils/helpers.py::inject_pwa_head).
+enableStaticServing = true
