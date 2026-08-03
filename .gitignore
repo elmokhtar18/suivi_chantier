@@ -9,3 +9,4 @@ streamlit_err.txt
 .streamlit/secrets.toml
 data/justificatifs/
 .claude/
+database/push_auto.log
