@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 database/*.db
+!database/suivi_chantier.db
 streamlit_log.txt
 streamlit_err.txt
 .streamlit/secrets.toml
