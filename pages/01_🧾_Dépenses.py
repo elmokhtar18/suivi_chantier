@@ -5,7 +5,7 @@ filtrage, tri et export (Excel / PDF / CSV) de toutes les dépenses du chantier.
 Chaque dépense créée, modifiée ou supprimée ici est automatiquement répercutée :
 - sur le coût total de son étape (page Étapes),
 - sur la dette du fournisseur concerné (page Fournisseurs / Dettes),
-- sur les avances de l'employé concerné (page Employés),
+- sur le total payé de l'employé concerné (page Employés),
 - sur les statistiques et le tableau de bord (page d'accueil).
 Cette automatisation est assurée par `database.add_depense`/`update_depense`/
 `delete_depense` et ne nécessite aucune actualisation manuelle : Streamlit

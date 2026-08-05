@@ -178,6 +178,7 @@ def init_db():
 
         _migrer_categorie_vers_fk(conn)
         _migrer_justificatif_path(conn)
+        _migrer_depense_employe_vers_paiement(conn)
         conn.executescript(SCHEMA_INDEXES)
 
         if conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone() is None:
@@ -221,6 +222,19 @@ def _migrer_justificatif_path(conn):
     colonnes = {row["name"] for row in conn.execute("PRAGMA table_info(depenses)").fetchall()}
     if "justificatif_path" not in colonnes:
         conn.execute("ALTER TABLE depenses ADD COLUMN justificatif_path TEXT DEFAULT ''")
+
+
+def _migrer_depense_employe_vers_paiement(conn):
+    """Migration : les mouvements générés automatiquement par une dépense
+    (`depense_id` non nul) étaient historiquement enregistrés comme 'avance'.
+    Une dépense représente un décaissement déjà effectué, pas une avance
+    donnée par anticipation : elle doit compter dans le "Total payé" de
+    l'employé, pas dans son "Total avancé". Corrige rétroactivement les
+    mouvements existants. Idempotente (ne trouve plus rien à corriger une
+    fois appliquée)."""
+    conn.execute(
+        "UPDATE mouvements_employes SET type = 'paiement' WHERE depense_id IS NOT NULL AND type = 'avance'"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +656,10 @@ def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_i
                  justificatif_path=""):
     """Ajoute une dépense et déclenche automatiquement le mouvement d'employé associé
     si la dépense concerne un employé (catégorie 'Employé' + employé renseigné).
+    Une dépense enregistrée représentant un décaissement déjà effectué (et non
+    une simple avance donnée par anticipation), elle compte comme un
+    'paiement' (Total payé), pas comme une 'avance' (Total avancé) — les
+    avances restent réservées à la saisie manuelle sur la page Employés.
     `justificatif_path` est le chemin local (dans data/justificatifs/) d'une photo
     ou d'un scan de facture pris/importé depuis le formulaire, facultatif."""
     with get_connection() as conn:
@@ -660,7 +678,7 @@ def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_i
         if employe_id:
             conn.execute(
                 """INSERT INTO mouvements_employes (employe_id, date, type, montant, commentaire, depense_id)
-                   VALUES (?, ?, 'avance', ?, ?, ?)""",
+                   VALUES (?, ?, 'paiement', ?, ?, ?)""",
                 (employe_id, date_depense, montant_total, f"Dépense: {designation}".strip(": "), depense_id),
             )
         return depense_id
@@ -685,7 +703,7 @@ def update_depense(depense_id, date_depense, designation, categorie_id, etape_id
         if employe_id:
             conn.execute(
                 """INSERT INTO mouvements_employes (employe_id, date, type, montant, commentaire, depense_id)
-                   VALUES (?, ?, 'avance', ?, ?, ?)""",
+                   VALUES (?, ?, 'paiement', ?, ?, ?)""",
                 (employe_id, date_depense, montant_total, f"Dépense: {designation}".strip(": "), depense_id),
             )
 

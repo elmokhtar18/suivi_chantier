@@ -5,9 +5,11 @@ avec enregistrement des avances et des paiements complémentaires.
 
 Le "Total dû" correspond au montant convenu pour la mission de l'employé
 (modifiable à tout moment). Chaque dépense de catégorie "Employé" liée à cet
-employé crée automatiquement une avance (voir `database.add_depense`) ; des
-avances ou paiements complémentaires peuvent aussi être ajoutés manuellement
-ici (ex : avances versées avant le début des travaux).
+employé (ajoutée ici ou depuis la page Dépenses) crée automatiquement un
+paiement — voir `database.add_depense` — puisqu'elle représente un
+décaissement déjà effectué. Les avances (argent versé par anticipation, avant
+même l'enregistrement d'une dépense) et les paiements complémentaires
+ponctuels peuvent en plus être ajoutés manuellement ici.
 """
 
 from datetime import date
