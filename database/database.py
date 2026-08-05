@@ -553,6 +553,33 @@ def get_mouvements_employe(employe_id):
         return _rows_to_dicts(rows)
 
 
+def get_mouvement_employe(mouvement_id):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM mouvements_employes WHERE id = ?", (mouvement_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def update_mouvement_employe(mouvement_id, montant, date_mouvement, commentaire):
+    """Modifie une avance/paiement complémentaire saisi manuellement. Sans effet
+    sur un mouvement généré automatiquement par une dépense (`depense_id` non
+    nul) : celui-ci doit être modifié depuis la dépense elle-même (page
+    Dépenses) pour ne pas désynchroniser les deux enregistrements."""
+    with get_connection() as conn:
+        conn.execute(
+            """UPDATE mouvements_employes SET montant = ?, date = ?, commentaire = ?
+               WHERE id = ? AND depense_id IS NULL""",
+            (montant, date_mouvement, commentaire, mouvement_id),
+        )
+
+
+def delete_mouvement_employe(mouvement_id):
+    """Supprime une avance/paiement complémentaire saisi manuellement. Sans effet
+    sur un mouvement lié à une dépense (celui-ci est supprimé automatiquement
+    avec la dépense via `delete_depense`, cascade SQL sur `depense_id`)."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM mouvements_employes WHERE id = ? AND depense_id IS NULL", (mouvement_id,))
+
+
 def get_totaux_employes():
     """Calcule pour chaque employé : total dû, total avancé, total payé, reste à payer."""
     with get_connection() as conn:
