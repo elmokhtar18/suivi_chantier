@@ -28,6 +28,7 @@ from utils.helpers import (
     STATUS_WARNING,
     bottom_nav_mobile,
     bouton_voir_detail,
+    chantier_selector,
     filtrer_depenses_dashboard,
     format_montant,
     inject_custom_css,
@@ -49,6 +50,7 @@ st.set_page_config(
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 
 # ---------------------------------------------------------------------------
 # Barre latérale
@@ -59,7 +61,7 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 💰 Budget global du projet")
-    budget_actuel = db.get_budget_global()
+    budget_actuel = db.get_budget_global(chantier_id)
     nouveau_budget = st.number_input(
         f"Budget total prévu ({CURRENCY})",
         min_value=0.0,
@@ -69,7 +71,7 @@ with st.sidebar:
         help="Laisser à 0 si aucun budget global n'est défini.",
     )
     if nouveau_budget != budget_actuel:
-        db.set_budget_global(nouveau_budget)
+        db.set_budget_global(chantier_id, nouveau_budget)
         st.rerun()
 
     st.divider()
@@ -80,8 +82,8 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Indicateurs globaux
 # ---------------------------------------------------------------------------
-ind = db.get_indicateurs_globaux()
-depenses = db.get_depenses()
+ind = db.get_indicateurs_globaux(chantier_id)
+depenses = db.get_depenses(chantier_id)
 df = pd.DataFrame(depenses)
 
 section_title("Tableau de bord principal", "📊")
@@ -137,7 +139,7 @@ col_g1, col_g2 = st.columns(2)
 
 with col_g1:
     section_title("Coût par étape", "🏗️")
-    couts_etapes = db.get_couts_par_etape()
+    couts_etapes = db.get_couts_par_etape(chantier_id)
     df_etapes = pd.DataFrame(couts_etapes)
     if not df_etapes.empty and df_etapes["cout_total"].sum() > 0:
         fig = px.bar(
@@ -198,7 +200,7 @@ col_cat, col_emp, col_mois_tbl = st.columns(3)
 
 with col_cat:
     st.markdown("**Par catégorie**")
-    totaux_cat = db.get_totaux_categories()
+    totaux_cat = db.get_totaux_categories(chantier_id)
     df_cat = pd.DataFrame([t for t in totaux_cat if t["nb_depenses"] > 0])
     if df_cat.empty:
         st.caption("Aucune donnée.")
@@ -214,7 +216,7 @@ with col_cat:
 
 with col_emp:
     st.markdown("**Par employé**")
-    totaux_emp = db.get_totaux_employes()
+    totaux_emp = db.get_totaux_employes(chantier_id)
     df_emp = pd.DataFrame(totaux_emp)
     if df_emp.empty:
         st.caption("Aucune donnée.")

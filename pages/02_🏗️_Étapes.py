@@ -9,12 +9,13 @@ import plotly.express as px
 import streamlit as st
 
 from database import database as db
-from utils.helpers import bottom_nav_mobile, SEQUENTIAL_BLUE, badge, confirm_delete, format_montant, inject_custom_css, inject_pwa_head, section_title, style_fig
+from utils.helpers import bottom_nav_mobile, SEQUENTIAL_BLUE, badge, chantier_selector, confirm_delete, format_montant, inject_custom_css, inject_pwa_head, section_title, style_fig
 
 st.set_page_config(page_title="Étapes - Suivi de Chantier", page_icon="🏗️", layout="wide")
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Gestion des étapes du chantier", "🏗️")
 
 # ---------------------------------------------------------------------------
@@ -32,10 +33,10 @@ with st.expander("➕ Ajouter une nouvelle étape", expanded=False):
         if st.form_submit_button("💾 Ajouter l'étape", width="stretch", type="primary"):
             if not nom.strip():
                 st.error("Le nom de l'étape est obligatoire.")
-            elif nom.strip() in [e["nom"] for e in db.get_etapes()]:
+            elif nom.strip() in [e["nom"] for e in db.get_etapes(chantier_id)]:
                 st.error("Une étape porte déjà ce nom.")
             else:
-                db.add_etape(nom.strip(), description.strip(), budget)
+                db.add_etape(chantier_id, nom.strip(), description.strip(), budget)
                 st.success(f"Étape « {nom} » ajoutée.")
                 st.rerun()
 
@@ -45,7 +46,7 @@ st.divider()
 # Vue d'ensemble : coût total + % budget consommé
 # ---------------------------------------------------------------------------
 section_title("Coût total par étape", "💰")
-couts = db.get_couts_par_etape()
+couts = db.get_couts_par_etape(chantier_id)
 
 if not couts:
     st.info("Aucune étape définie pour le moment.")
@@ -88,7 +89,7 @@ st.divider()
 # Modifier / supprimer une étape
 # ---------------------------------------------------------------------------
 section_title("Modifier ou supprimer une étape", "✏️")
-etapes = db.get_etapes()
+etapes = db.get_etapes(chantier_id)
 if etapes:
     options = {f"{e['nom']}": e["id"] for e in etapes}
     choix = st.selectbox("Sélectionner une étape", ["-"] + list(options.keys()))

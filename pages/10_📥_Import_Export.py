@@ -17,12 +17,13 @@ import streamlit as st
 from database import database as db
 from utils import excel_import
 from utils.exports import export_csv_bytes, export_excel_bytes, export_pdf_bytes
-from utils.helpers import bottom_nav_mobile, bouton_partage_pdf, inject_custom_css, inject_pwa_head, section_title
+from utils.helpers import bottom_nav_mobile, bouton_partage_pdf, chantier_selector, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Import / Export - Suivi de Chantier", page_icon="📥", layout="wide")
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Importation d'un fichier Excel", "📥")
 
 st.caption(
@@ -78,7 +79,7 @@ if fichier is not None:
         st.dataframe(preview["df"].head(20), width="stretch", hide_index=True)
 
         if st.button("✅ Confirmer l'import en base de données", type="primary", width="stretch"):
-            resume = excel_import.importer_dataframe(preview["df"])
+            resume = excel_import.importer_dataframe(chantier_id, preview["df"])
             st.success(
                 f"Import terminé : {resume['nb_importees']} dépense(s) importée(s), "
                 f"{resume['nb_ignorees']} ligne(s) ignorée(s) (vides)."
@@ -102,11 +103,11 @@ st.divider()
 section_title("Exportation des données", "📤")
 st.caption("Exportez l'ensemble des données de l'application, table par table, ou en un seul classeur Excel.")
 
-depenses_df = pd.DataFrame(db.get_depenses())
-fournisseurs_df = pd.DataFrame(db.get_dettes_fournisseurs())
-employes_df = pd.DataFrame(db.get_totaux_employes())
-etapes_df = pd.DataFrame(db.get_couts_par_etape())
-paiements_df = pd.DataFrame(db.get_historique_paiements())
+depenses_df = pd.DataFrame(db.get_depenses(chantier_id))
+fournisseurs_df = pd.DataFrame(db.get_dettes_fournisseurs(chantier_id))
+employes_df = pd.DataFrame(db.get_totaux_employes(chantier_id))
+etapes_df = pd.DataFrame(db.get_couts_par_etape(chantier_id))
+paiements_df = pd.DataFrame(db.get_historique_paiements(chantier_id))
 
 c1, c2 = st.columns(2)
 with c1:

@@ -14,6 +14,7 @@ from utils.helpers import (
     CATEGORICAL,
     STATUS_CRITICAL,
     bottom_nav_mobile,
+    chantier_selector,
     format_montant,
     inject_custom_css,
     inject_pwa_head,
@@ -29,9 +30,10 @@ st.set_page_config(page_title="Dettes Fournisseurs - Suivi de Chantier", page_ic
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Dettes Fournisseurs", "📉")
 
-dettes = db.get_dettes_fournisseurs()
+dettes = db.get_dettes_fournisseurs(chantier_id)
 
 if not dettes:
     st.info("Aucun fournisseur enregistré pour le moment.")

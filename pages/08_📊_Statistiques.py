@@ -16,6 +16,7 @@ from utils.helpers import (
     CURRENCY,
     SEQUENTIAL_BLUE,
     bottom_nav_mobile,
+    chantier_selector,
     inject_custom_css,
     inject_pwa_head,
     section_title,
@@ -26,9 +27,10 @@ st.set_page_config(page_title="Statistiques - Suivi de Chantier", page_icon="�
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Statistiques du chantier", "📊")
 
-depenses = db.get_depenses()
+depenses = db.get_depenses(chantier_id)
 if not depenses:
     st.info("Aucune dépense enregistrée pour le moment : les statistiques apparaîtront ici dès la première dépense.")
     bottom_nav_mobile()

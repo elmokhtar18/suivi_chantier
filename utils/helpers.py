@@ -15,6 +15,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from database import database as db
+
 # Devise utilisée dans tout le projet (Ouguiya mauritanien). Modifier cette
 # seule constante suffit à changer la devise affichée dans toute l'application.
 CURRENCY = "MRU"
@@ -603,6 +605,67 @@ def inject_pwa_head():
         height=1,
         width=1,
     )
+
+
+def chantier_selector():
+    """Sélecteur du chantier actif, affiché en haut de la barre latérale.
+    L'application gère plusieurs chantiers en parallèle, chacun avec ses
+    propres étapes/catégories/fournisseurs/employés/dépenses (cloisonnement
+    total, voir `database.database`) : ce sélecteur détermine lequel est
+    affiché/édité sur la page courante. Mémorise le choix dans
+    `st.session_state["chantier_actif_id"]` et **retourne cet id** — à
+    appeler une fois en haut de chaque page, juste après `inject_pwa_head()`."""
+    chantiers = db.get_chantiers()
+
+    if not chantiers:
+        # Cas normalement impossible après le premier lancement (`init_db`
+        # crée toujours "Chantier 1" s'il n'en existe aucun) — gardé pour la
+        # robustesse si tous les chantiers ont été supprimés.
+        st.sidebar.warning("Aucun chantier n'existe encore.")
+        with st.sidebar.form("form_creation_premier_chantier"):
+            nom = st.text_input("Nom du nouveau chantier")
+            if st.form_submit_button("➕ Créer ce chantier", type="primary"):
+                if nom.strip():
+                    db.add_chantier(nom.strip())
+                    st.rerun()
+        st.stop()
+
+    noms = [c["nom"] for c in chantiers]
+    ids_par_nom = {c["nom"]: c["id"] for c in chantiers}
+    noms_par_id = {c["id"]: c["nom"] for c in chantiers}
+
+    # Constat vérifié empiriquement (pas une supposition) : la valeur mémorisée
+    # d'un widget Streamlit sous sa `key` (ici "chantier_actif_nom") NE
+    # survit PAS à une navigation vers une autre page en multipage — seule
+    # une entrée `st.session_state` "libre" (non liée à un widget), ici
+    # `chantier_actif_id`, persiste de façon fiable d'une page à l'autre.
+    # C'est donc `chantier_actif_id` qui fait autorité, recalculé en `index=`
+    # à chaque rendu plutôt que délégué à la mémoire du widget lui-même.
+    #
+    # Changer le chantier actif par programme (ex. juste après sa création,
+    # voir `pages/00_🏗️_Chantiers.py`) écrit dans la clé intermédiaire
+    # `_chantier_actif_id_demande` puis appelle `st.rerun()`. Sur une
+    # navigation la clé du widget est déjà absente donc `index=` suffit ; sur
+    # un rerun resté sur la même page il faut en plus l'effacer explicitement
+    # ci-dessous, sinon sa mémoire (valeur *avant* la demande) l'emporterait.
+    id_demande = st.session_state.pop("_chantier_actif_id_demande", None)
+    if id_demande in noms_par_id:
+        st.session_state["chantier_actif_id"] = id_demande
+        st.session_state.pop("chantier_actif_nom", None)
+
+    nom_actif = noms_par_id.get(st.session_state.get("chantier_actif_id"), noms[0])
+
+    # Pas de lien manuel vers la page Chantiers ici : Streamlit liste déjà
+    # automatiquement toutes les pages de `pages/` dans la navigation latérale
+    # (dont "00_🏗️_Chantiers.py", en tête grâce à son préfixe numérique).
+    with st.sidebar:
+        choix = st.selectbox(
+            "🏗️ Chantier actif", noms, index=noms.index(nom_actif), key="chantier_actif_nom"
+        )
+
+    chantier_id = ids_par_nom[choix]
+    st.session_state["chantier_actif_id"] = chantier_id
+    return chantier_id
 
 
 def bottom_nav_mobile():

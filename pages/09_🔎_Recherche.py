@@ -8,12 +8,13 @@ import pandas as pd
 import streamlit as st
 
 from database import database as db
-from utils.helpers import bottom_nav_mobile, format_montant, inject_custom_css, inject_pwa_head, section_title
+from utils.helpers import bottom_nav_mobile, chantier_selector, format_montant, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Recherche - Suivi de Chantier", page_icon="🔎", layout="wide")
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Recherche globale", "🔎")
 
 requete = st.text_input("🔎 Rechercher un fournisseur, un employé, une dépense, une facture, une étape...")
@@ -28,7 +29,7 @@ q = requete.strip().lower()
 # ---------------------------------------------------------------------------
 # Étapes
 # ---------------------------------------------------------------------------
-etapes = [e for e in db.get_etapes() if q in (e["nom"] or "").lower() or q in (e["description"] or "").lower()]
+etapes = [e for e in db.get_etapes(chantier_id) if q in (e["nom"] or "").lower() or q in (e["description"] or "").lower()]
 section_title(f"Étapes ({len(etapes)})", "🏗️")
 if etapes:
     df_e = pd.DataFrame(etapes)[["nom", "description", "budget_alloue"]]
@@ -41,7 +42,7 @@ else:
 # Fournisseurs
 # ---------------------------------------------------------------------------
 fournisseurs = [
-    f for f in db.get_fournisseurs()
+    f for f in db.get_fournisseurs(chantier_id)
     if q in (f["nom"] or "").lower() or q in (f["telephone"] or "").lower()
     or q in (f["type_materiaux"] or "").lower() or q in (f["adresse"] or "").lower()
 ]
@@ -57,7 +58,7 @@ else:
 # Employés
 # ---------------------------------------------------------------------------
 employes = [
-    e for e in db.get_employes()
+    e for e in db.get_employes(chantier_id)
     if q in (e["nom"] or "").lower() or q in (e["fonction"] or "").lower() or q in (e["telephone"] or "").lower()
 ]
 section_title(f"Employés ({len(employes)})", "👷")
@@ -71,7 +72,7 @@ else:
 # ---------------------------------------------------------------------------
 # Dépenses (désignation, catégorie, observation = tient lieu de recherche de facture)
 # ---------------------------------------------------------------------------
-toutes_depenses = db.get_depenses()
+toutes_depenses = db.get_depenses(chantier_id)
 depenses = [
     d for d in toutes_depenses
     if q in (d["designation"] or "").lower() or q in (d["observation"] or "").lower()

@@ -13,12 +13,13 @@ import plotly.express as px
 import streamlit as st
 
 from database import database as db
-from utils.helpers import bottom_nav_mobile, CATEGORICAL, confirm_delete, inject_custom_css, inject_pwa_head, section_title, style_fig
+from utils.helpers import bottom_nav_mobile, CATEGORICAL, chantier_selector, confirm_delete, inject_custom_css, inject_pwa_head, section_title, style_fig
 
 st.set_page_config(page_title="Catégories - Suivi de Chantier", page_icon="🏷️", layout="wide")
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Gestion des catégories", "🏷️")
 
 # ---------------------------------------------------------------------------
@@ -30,10 +31,10 @@ with st.expander("➕ Ajouter une nouvelle catégorie", expanded=False):
         if st.form_submit_button("💾 Ajouter la catégorie", width="stretch", type="primary"):
             if not nom.strip():
                 st.error("Le nom de la catégorie est obligatoire.")
-            elif db.get_categorie_by_nom(nom.strip()):
+            elif db.get_categorie_by_nom(chantier_id, nom.strip()):
                 st.error("Une catégorie porte déjà ce nom.")
             else:
-                db.add_categorie(nom.strip())
+                db.add_categorie(chantier_id, nom.strip())
                 st.success(f"Catégorie « {nom} » ajoutée.")
                 st.rerun()
 
@@ -43,7 +44,7 @@ st.divider()
 # Vue d'ensemble : nombre de dépenses + montant total par catégorie
 # ---------------------------------------------------------------------------
 section_title("Dépenses par catégorie", "💰")
-totaux = db.get_totaux_categories()
+totaux = db.get_totaux_categories(chantier_id)
 
 if not totaux:
     st.info("Aucune catégorie définie pour le moment.")
@@ -70,7 +71,7 @@ st.divider()
 # Modifier / supprimer une catégorie
 # ---------------------------------------------------------------------------
 section_title("Modifier ou supprimer une catégorie", "✏️")
-categories = db.get_categories()
+categories = db.get_categories(chantier_id)
 if categories:
     options = {c["nom"]: c["id"] for c in categories}
     choix = st.selectbox("Sélectionner une catégorie", ["-"] + list(options.keys()))

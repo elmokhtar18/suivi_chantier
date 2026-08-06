@@ -13,12 +13,13 @@ import pandas as pd
 import streamlit as st
 
 from database import database as db
-from utils.helpers import bottom_nav_mobile, MODES_PAIEMENT, confirm_delete, dette_badge, format_montant, inject_custom_css, inject_pwa_head, section_title
+from utils.helpers import bottom_nav_mobile, MODES_PAIEMENT, chantier_selector, confirm_delete, dette_badge, format_montant, inject_custom_css, inject_pwa_head, section_title
 
 st.set_page_config(page_title="Fournisseurs - Suivi de Chantier", page_icon="🧱", layout="wide")
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Gestion des fournisseurs", "🧱")
 
 # ---------------------------------------------------------------------------
@@ -37,10 +38,10 @@ with st.expander("➕ Ajouter un nouveau fournisseur", expanded=False):
         if st.form_submit_button("💾 Ajouter le fournisseur", width="stretch", type="primary"):
             if not nom.strip():
                 st.error("Le nom est obligatoire.")
-            elif db.get_fournisseur_by_nom(nom.strip()):
+            elif db.get_fournisseur_by_nom(chantier_id, nom.strip()):
                 st.error("Un fournisseur porte déjà ce nom.")
             else:
-                db.add_fournisseur(nom.strip(), telephone.strip(), adresse.strip(), type_materiaux.strip(), solde_initial)
+                db.add_fournisseur(chantier_id, nom.strip(), telephone.strip(), adresse.strip(), type_materiaux.strip(), solde_initial)
                 st.success(f"Fournisseur « {nom} » ajouté.")
                 st.rerun()
 
@@ -50,7 +51,7 @@ st.divider()
 # Liste des fournisseurs
 # ---------------------------------------------------------------------------
 section_title("Liste des fournisseurs", "📋")
-dettes = db.get_dettes_fournisseurs()
+dettes = db.get_dettes_fournisseurs(chantier_id)
 
 if not dettes:
     st.info("Aucun fournisseur enregistré pour le moment.")
@@ -70,7 +71,7 @@ st.divider()
 # Fiche fournisseur
 # ---------------------------------------------------------------------------
 section_title("Fiche fournisseur", "📇")
-fournisseurs = db.get_fournisseurs()
+fournisseurs = db.get_fournisseurs(chantier_id)
 
 if not fournisseurs:
     st.info("Ajoutez un fournisseur pour consulter sa fiche.")

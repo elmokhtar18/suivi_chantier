@@ -13,6 +13,7 @@ from utils.exports import export_csv_bytes, export_excel_bytes, export_pdf_bytes
 from utils.helpers import (
     bottom_nav_mobile,
     bouton_partage_pdf,
+    chantier_selector,
     format_montant,
     inject_custom_css,
     inject_pwa_head,
@@ -24,9 +25,10 @@ st.set_page_config(page_title="Paiements - Suivi de Chantier", page_icon="💳",
 db.init_db()
 inject_custom_css()
 inject_pwa_head()
+chantier_id = chantier_selector()
 section_title("Historique des paiements", "💳")
 
-historique = db.get_historique_paiements()
+historique = db.get_historique_paiements(chantier_id)
 
 if not historique:
     st.info("Aucun paiement enregistré pour le moment.")

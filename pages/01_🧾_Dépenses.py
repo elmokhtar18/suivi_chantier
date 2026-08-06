@@ -30,6 +30,7 @@ from utils.helpers import (
     afficher_justificatif,
     bottom_nav_mobile,
     bouton_partage_pdf,
+    chantier_selector,
     enregistrer_justificatif,
     flash,
     format_date,
@@ -46,6 +47,7 @@ db.init_db()
 inject_custom_css()
 inject_pwa_head()
 render_flash()
+chantier_id = chantier_selector()
 section_title("Gestion des dépenses", "🧾")
 
 NOUVEAU_SENTINEL = "➕ Nouveau..."
@@ -71,10 +73,10 @@ def dialog_modifier_depense(depense_id):
         st.error("Cette dépense n'existe plus (elle a peut-être déjà été supprimée).")
         return
 
-    etapes = db.get_etapes()
-    fournisseurs = db.get_fournisseurs()
-    employes = db.get_employes()
-    categories = [c["nom"] for c in db.get_categories()]
+    etapes = db.get_etapes(chantier_id)
+    fournisseurs = db.get_fournisseurs(chantier_id)
+    employes = db.get_employes(chantier_id)
+    categories = [c["nom"] for c in db.get_categories(chantier_id)]
 
     if depense["justificatif_path"]:
         st.markdown("**📎 Justificatif actuel**")
@@ -138,9 +140,9 @@ def dialog_modifier_depense(depense_id):
                 st.error("La désignation est obligatoire.")
             else:
                 etape_id = next(e["id"] for e in etapes if e["nom"] == e_etape)
-                fournisseur_id = db.get_or_create_fournisseur(e_fournisseur) if e_fournisseur != "Aucun" else None
-                employe_id = db.get_or_create_employe(e_employe) if e_employe != "Aucun" else None
-                categorie_id = db.get_or_create_categorie(e_categorie) if e_categorie != "Aucune" else None
+                fournisseur_id = db.get_or_create_fournisseur(chantier_id, e_fournisseur) if e_fournisseur != "Aucun" else None
+                employe_id = db.get_or_create_employe(chantier_id, e_employe) if e_employe != "Aucun" else None
+                categorie_id = db.get_or_create_categorie(chantier_id, e_categorie) if e_categorie != "Aucune" else None
                 nouveau_justificatif = enregistrer_justificatif(e_fichier or e_photo)
                 db.update_depense(
                     depense_id=depense_id, date_depense=e_date.isoformat(), designation=e_designation.strip(),
@@ -181,10 +183,10 @@ def dialog_supprimer_depense(depense_id):
 # Formulaire d'ajout
 # ---------------------------------------------------------------------------
 with st.expander("➕ Enregistrer une nouvelle dépense", expanded=False):
-    etapes = db.get_etapes()
-    fournisseurs = db.get_fournisseurs()
-    employes = db.get_employes()
-    categories = [c["nom"] for c in db.get_categories()]
+    etapes = db.get_etapes(chantier_id)
+    fournisseurs = db.get_fournisseurs(chantier_id)
+    employes = db.get_employes(chantier_id)
+    categories = [c["nom"] for c in db.get_categories(chantier_id)]
 
     if not etapes:
         st.warning("Créez d'abord au moins une étape sur la page **Étapes**.")
@@ -232,14 +234,15 @@ with st.expander("➕ Enregistrer une nouvelle dépense", expanded=False):
                     montant = f_montant_manuel if f_montant_manuel > 0 else f_quantite * f_prix_unitaire
                     etape_id = next(e["id"] for e in etapes if e["nom"] == f_etape_nom)
                     fournisseur_id = (
-                        db.get_or_create_fournisseur(f_fournisseur) if f_fournisseur and f_fournisseur != "Aucun" else None
+                        db.get_or_create_fournisseur(chantier_id, f_fournisseur) if f_fournisseur and f_fournisseur != "Aucun" else None
                     )
                     employe_id = (
-                        db.get_or_create_employe(f_employe) if f_employe and f_employe != "Aucun" else None
+                        db.get_or_create_employe(chantier_id, f_employe) if f_employe and f_employe != "Aucun" else None
                     )
-                    categorie_id = db.get_or_create_categorie(f_categorie) if f_categorie and f_categorie != "Aucune" else None
+                    categorie_id = db.get_or_create_categorie(chantier_id, f_categorie) if f_categorie and f_categorie != "Aucune" else None
                     justificatif_path = enregistrer_justificatif(f_fichier or f_photo)
                     db.add_depense(
+                        chantier_id=chantier_id,
                         date_depense=f_date.isoformat(),
                         designation=f_designation.strip(),
                         categorie_id=categorie_id,
@@ -263,7 +266,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Filtres
 # ---------------------------------------------------------------------------
-depenses = db.get_depenses()
+depenses = db.get_depenses(chantier_id)
 df = pd.DataFrame(depenses)
 
 section_title("Filtrer, rechercher et trier", "🔍")

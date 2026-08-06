@@ -172,13 +172,14 @@ def _clean_text(valeur):
     return str(valeur).strip()
 
 
-def importer_dataframe(df):
-    """Insère les lignes d'un DataFrame déjà mappé (colonnes canoniques) dans la base.
+def importer_dataframe(chantier_id, df):
+    """Insère les lignes d'un DataFrame déjà mappé (colonnes canoniques) dans la base,
+    pour le chantier `chantier_id`.
 
     Crée automatiquement les étapes, fournisseurs et employés référencés mais absents
-    de la base. Retourne un résumé (nombre de lignes importées / ignorées / entités créées).
+    de ce chantier. Retourne un résumé (nombre de lignes importées / ignorées / entités créées).
     """
-    etapes_existantes = {e["nom"]: e["id"] for e in db.get_etapes()}
+    etapes_existantes = {e["nom"]: e["id"] for e in db.get_etapes(chantier_id)}
     fournisseurs_crees, employes_crees, etapes_creees, categories_creees = set(), set(), set(), set()
     nb_importees, nb_ignorees = 0, 0
 
@@ -199,8 +200,8 @@ def importer_dataframe(df):
         # Catégorie
         categorie_id = None
         if categorie:
-            avant = db.get_categorie_by_nom(categorie)
-            categorie_id = db.get_or_create_categorie(categorie)
+            avant = db.get_categorie_by_nom(chantier_id, categorie)
+            categorie_id = db.get_or_create_categorie(chantier_id, categorie)
             if not avant:
                 categories_creees.add(categorie)
 
@@ -209,7 +210,7 @@ def importer_dataframe(df):
         nom_etape = _clean_text(row.get("etape"))
         if nom_etape:
             if nom_etape not in etapes_existantes:
-                etapes_existantes[nom_etape] = db.add_etape(nom_etape)
+                etapes_existantes[nom_etape] = db.add_etape(chantier_id, nom_etape)
                 etapes_creees.add(nom_etape)
             etape_id = etapes_existantes[nom_etape]
 
@@ -217,8 +218,8 @@ def importer_dataframe(df):
         fournisseur_id = None
         nom_fournisseur = _clean_text(row.get("fournisseur"))
         if nom_fournisseur:
-            avant = db.get_fournisseur_by_nom(nom_fournisseur)
-            fournisseur_id = db.get_or_create_fournisseur(nom_fournisseur)
+            avant = db.get_fournisseur_by_nom(chantier_id, nom_fournisseur)
+            fournisseur_id = db.get_or_create_fournisseur(chantier_id, nom_fournisseur)
             if not avant:
                 fournisseurs_crees.add(nom_fournisseur)
 
@@ -229,8 +230,8 @@ def importer_dataframe(df):
         if not nom_employe and _normalize(categorie).startswith("employ"):
             nom_employe = designation
         if nom_employe:
-            avant = db.get_employe_by_nom(nom_employe)
-            employe_id = db.get_or_create_employe(nom_employe)
+            avant = db.get_employe_by_nom(chantier_id, nom_employe)
+            employe_id = db.get_or_create_employe(chantier_id, nom_employe)
             if not avant:
                 employes_crees.add(nom_employe)
 
@@ -242,6 +243,7 @@ def importer_dataframe(df):
         date_iso = _to_iso_date(row.get("date")) or db._today()
 
         db.add_depense(
+            chantier_id=chantier_id,
             date_depense=date_iso,
             designation=designation,
             categorie_id=categorie_id,
@@ -262,7 +264,7 @@ def importer_dataframe(df):
     # avancé, pour que le reste à payer parte de 0 plutôt que d'un solde négatif trompeur.
     # L'utilisateur peut ensuite ajuster ce montant dû librement sur la fiche de l'employé.
     for nom in employes_crees:
-        employe = db.get_employe_by_nom(nom)
+        employe = db.get_employe_by_nom(chantier_id, nom)
         totaux = db.get_totaux_employe(employe["id"])
         db.update_employe(employe["id"], employe["nom"], employe["fonction"], employe["telephone"],
                            montant_du=totaux["total_regle"])
@@ -277,8 +279,9 @@ def importer_dataframe(df):
     }
 
 
-def importer_fichier(source, sheet_name=None):
-    """Point d'entrée haut niveau : détecte l'en-tête + les colonnes puis importe.
+def importer_fichier(chantier_id, source, sheet_name=None):
+    """Point d'entrée haut niveau : détecte l'en-tête + les colonnes puis importe
+    dans le chantier `chantier_id`.
 
     `source` peut être un chemin de fichier ou un objet fichier uploadé (Streamlit).
     Retourne (resume_dict, colonnes_mappees, df_apercu) ou lève ValueError si aucun
@@ -300,5 +303,5 @@ def importer_fichier(source, sheet_name=None):
         raise ValueError("Aucune colonne de montant n'a pu être identifiée dans l'en-tête détecté.")
 
     df = build_dataframe(raw_df, header_row, mapping)
-    resume = importer_dataframe(df)
+    resume = importer_dataframe(chantier_id, df)
     return resume, mapping, df

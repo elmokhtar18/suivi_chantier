@@ -48,13 +48,12 @@ def verifier_budget_etape(etape_id):
     Ne fait rien si l'étape n'a pas de budget défini (`budget_alloue` = 0)."""
     if not etape_id:
         return
-    for etape in db.get_couts_par_etape():
-        if etape["id"] == etape_id and etape["pct_budget"] is not None and etape["pct_budget"] >= 100:
-            flash(
-                f"L'étape « {etape['nom']} » a atteint {etape['pct_budget']}% de son budget alloué.",
-                icone="⚠️", notifier=True, titre_notification="Budget d'étape dépassé",
-            )
-            return
+    etape = db.get_cout_etape(etape_id)
+    if etape and etape["pct_budget"] is not None and etape["pct_budget"] >= 100:
+        flash(
+            f"L'étape « {etape['nom']} » a atteint {etape['pct_budget']}% de son budget alloué.",
+            icone="⚠️", notifier=True, titre_notification="Budget d'étape dépassé",
+        )
 
 
 def notifier_rappel_saisie():

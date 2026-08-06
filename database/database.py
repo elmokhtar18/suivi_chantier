@@ -6,6 +6,14 @@ automatiquement les tables nécessaires au premier lancement, expose des
 fonctions CRUD simples pour chaque entité, ainsi que des fonctions de calcul
 (agrégats) réutilisées par les différentes pages Streamlit.
 
+L'application gère plusieurs chantiers en parallèle (table `chantiers`) :
+étapes, catégories, fournisseurs, employés et dépenses appartiennent chacun
+à exactement un chantier (cloisonnement total, pas de partage entre
+chantiers). Les fonctions qui listent/agrègent un ensemble d'entités prennent
+donc un paramètre `chantier_id` ; celles qui opèrent sur un id déjà connu
+(`get_etape(id)`, `update_fournisseur(id, ...)`, etc.) n'en ont pas besoin,
+cet id appartenant déjà à un seul chantier.
+
 Le fichier SQLite est stocké dans database/suivi_chantier.db, à côté de ce
 module, pour que l'application fonctionne quel que soit le répertoire courant
 depuis lequel elle est lancée.
@@ -41,41 +49,59 @@ def get_connection():
 # ---------------------------------------------------------------------------
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS etapes (
+CREATE TABLE IF NOT EXISTS chantiers (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     nom             TEXT NOT NULL UNIQUE,
+    adresse         TEXT DEFAULT '',
     description     TEXT DEFAULT '',
-    budget_alloue   REAL DEFAULT 0,
-    ordre           INTEGER DEFAULT 0,
+    statut          TEXT DEFAULT 'En cours',
     date_creation   TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS etapes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+    nom             TEXT NOT NULL,
+    description     TEXT DEFAULT '',
+    budget_alloue   REAL DEFAULT 0,
+    ordre           INTEGER DEFAULT 0,
+    date_creation   TEXT DEFAULT (datetime('now')),
+    UNIQUE(chantier_id, nom)
+);
+
 CREATE TABLE IF NOT EXISTS categories (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    nom     TEXT NOT NULL UNIQUE
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    chantier_id INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+    nom         TEXT NOT NULL,
+    UNIQUE(chantier_id, nom)
 );
 
 CREATE TABLE IF NOT EXISTS fournisseurs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    nom             TEXT NOT NULL UNIQUE,
+    chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+    nom             TEXT NOT NULL,
     telephone       TEXT DEFAULT '',
     adresse         TEXT DEFAULT '',
     type_materiaux  TEXT DEFAULT '',
     solde_initial   REAL DEFAULT 0,
-    date_creation   TEXT DEFAULT (datetime('now'))
+    date_creation   TEXT DEFAULT (datetime('now')),
+    UNIQUE(chantier_id, nom)
 );
 
 CREATE TABLE IF NOT EXISTS employes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    nom             TEXT NOT NULL UNIQUE,
+    chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+    nom             TEXT NOT NULL,
     fonction        TEXT DEFAULT '',
     telephone       TEXT DEFAULT '',
     montant_du      REAL DEFAULT 0,
-    date_creation   TEXT DEFAULT (datetime('now'))
+    date_creation   TEXT DEFAULT (datetime('now')),
+    UNIQUE(chantier_id, nom)
 );
 
 CREATE TABLE IF NOT EXISTS depenses (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
     date            TEXT NOT NULL,
     designation     TEXT DEFAULT '',
     categorie_id    INTEGER REFERENCES categories(id) ON DELETE SET NULL,
@@ -113,15 +139,20 @@ CREATE TABLE IF NOT EXISTS mouvements_employes (
     created_at      TEXT DEFAULT (datetime('now'))
 );
 
+-- Une ligne = un réglage pour un chantier donné (ex. budget_global). Le
+-- budget "global" est en réalité un budget par chantier.
 CREATE TABLE IF NOT EXISTS settings (
-    key     TEXT PRIMARY KEY,
-    value   TEXT
+    chantier_id INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+    key         TEXT NOT NULL,
+    value       TEXT,
+    PRIMARY KEY (chantier_id, key)
 );
 
 -- Abonnements aux notifications push navigateur (Web Push). Architecture
 -- prête pour de futures notifications serveur (budget dépassé, rappel...) —
 -- non activée : voir utils/notifications.py pour ce qu'il reste à câbler
--- (clé VAPID, envoi via pywebpush, déclencheur planifié).
+-- (clé VAPID, envoi via pywebpush, déclencheur planifié). Pas lié à un
+-- chantier : un abonnement est propre au navigateur/appareil.
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     endpoint        TEXT NOT NULL UNIQUE,
@@ -131,17 +162,24 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 """
 
-# Séparés du schéma des tables : ces index portent sur `depenses.categorie_id`, qui
-# n'existe pas encore sur une base créée avant la migration (voir `_migrer_categorie_vers_fk`).
-# Ils sont donc créés APRÈS la migration, une fois la colonne garantie présente.
+# Séparés du schéma des tables : ces index portent sur des colonnes qui
+# n'existent pas encore sur une base créée avant les migrations correspondantes
+# (`categorie_id` avant `_migrer_categorie_vers_fk`, `chantier_id` avant
+# `_migrer_vers_multi_chantier`). Ils sont donc créés APRÈS les migrations,
+# une fois ces colonnes garanties présentes.
 SCHEMA_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_depenses_etape       ON depenses(etape_id);
 CREATE INDEX IF NOT EXISTS idx_depenses_fournisseur ON depenses(fournisseur_id);
 CREATE INDEX IF NOT EXISTS idx_depenses_employe     ON depenses(employe_id);
 CREATE INDEX IF NOT EXISTS idx_depenses_categorie   ON depenses(categorie_id);
 CREATE INDEX IF NOT EXISTS idx_depenses_date        ON depenses(date);
+CREATE INDEX IF NOT EXISTS idx_depenses_chantier    ON depenses(chantier_id);
 CREATE INDEX IF NOT EXISTS idx_mouv_employe         ON mouvements_employes(employe_id);
 CREATE INDEX IF NOT EXISTS idx_paiements_fourn      ON paiements_fournisseurs(fournisseur_id);
+CREATE INDEX IF NOT EXISTS idx_etapes_chantier      ON etapes(chantier_id);
+CREATE INDEX IF NOT EXISTS idx_categories_chantier  ON categories(chantier_id);
+CREATE INDEX IF NOT EXISTS idx_fournisseurs_chantier ON fournisseurs(chantier_id);
+CREATE INDEX IF NOT EXISTS idx_employes_chantier    ON employes(chantier_id);
 """
 
 DEFAULT_ETAPES = [
@@ -161,28 +199,20 @@ def init_db():
     with get_connection() as conn:
         conn.executescript(SCHEMA)
 
-        # Étapes par défaut (uniquement si la table est vide -> premier lancement)
-        nb_etapes = conn.execute("SELECT COUNT(*) FROM etapes").fetchone()[0]
-        if nb_etapes == 0:
-            conn.executemany(
-                "INSERT INTO etapes (nom, description, ordre) VALUES (?, ?, ?)",
-                DEFAULT_ETAPES,
-            )
-
-        nb_categories = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
-        if nb_categories == 0:
-            conn.executemany(
-                "INSERT INTO categories (nom) VALUES (?)",
-                [(c,) for c in DEFAULT_CATEGORIES],
-            )
-
         _migrer_categorie_vers_fk(conn)
         _migrer_justificatif_path(conn)
         _migrer_depense_employe_vers_paiement(conn)
-        conn.executescript(SCHEMA_INDEXES)
+        _migrer_vers_multi_chantier(conn)
 
-        if conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone() is None:
-            conn.execute("INSERT INTO settings (key, value) VALUES ('budget_global', '0')")
+        # Premier lancement (aucun chantier existant) : crée un chantier par défaut
+        nb_chantiers = conn.execute("SELECT COUNT(*) FROM chantiers").fetchone()[0]
+        if nb_chantiers == 0:
+            chantier_id = conn.execute(
+                "INSERT INTO chantiers (nom) VALUES (?)", ("Chantier 1",)
+            ).lastrowid
+            _seed_chantier_defaults(conn, chantier_id)
+
+        conn.executescript(SCHEMA_INDEXES)
 
 
 def _migrer_categorie_vers_fk(conn):
@@ -237,6 +267,237 @@ def _migrer_depense_employe_vers_paiement(conn):
     )
 
 
+def _migrer_vers_multi_chantier(conn):
+    """Migration : introduit la notion de "chantier" pour gérer plusieurs
+    chantiers en parallèle. Avant cette migration, toutes les données
+    (étapes, catégories, fournisseurs, employés, dépenses, réglages) étaient
+    globales, comme s'il n'existait qu'un seul chantier implicite.
+
+    Rattache toutes les données existantes à un premier chantier
+    "Chantier 1", et élargit les contraintes d'unicité (nom d'étape/
+    catégorie/fournisseur/employé) pour qu'elles ne s'appliquent plus que par
+    chantier (ex. deux chantiers peuvent chacun avoir une étape "Fondations").
+
+    SQLite ne permet pas d'ajouter une contrainte UNIQUE composite via
+    ALTER TABLE : chaque table concernée est recréée avec le nouveau schéma,
+    puis ses lignes sont recopiées (même `id`, pour ne pas casser les clés
+    étrangères des dépenses).
+
+    Piège vérifié empiriquement (pas une supposition) : sur SQLite, `DROP
+    TABLE parent` déclenche les actions `ON DELETE CASCADE`/`SET NULL` de
+    TOUTE table encore vivante référençant `parent` par son nom — y compris
+    une table de remplacement fraîchement créée si sa FK cite encore ce nom.
+    `ALTER TABLE ... RENAME`, à l'inverse, ne déclenche aucune action et met
+    à jour tout seul le texte des FK des autres tables pour suivre le nouveau
+    nom. La séquence ci-dessous exploite ceci : toutes les tables `_new` sont
+    d'abord créées et peuplées en pointant leurs FK les unes vers les autres
+    (`_new` vers `_new`, jamais vers un nom final déjà utilisé par une table
+    encore vivante) ; les anciennes tables sont ensuite supprimées (plus rien
+    ne les référence) ; enfin chaque `_new` est renommée vers son nom final,
+    ce qui met à jour en cascade (sans perte de données, juste du texte SQL)
+    les FK des autres tables `_new` qui la citaient.
+
+    Idempotente : ne fait rien si `etapes` a déjà `chantier_id` (cas normal
+    après la toute première exécution, ou pour une base neuve créée
+    directement avec le nouveau schéma — `chantiers` est alors déjà créée par
+    `SCHEMA` et cette fonction n'a rien à recopier)."""
+    colonnes_etapes = {row["name"] for row in conn.execute("PRAGMA table_info(etapes)").fetchall()}
+    if "chantier_id" in colonnes_etapes:
+        return  # déjà migré (ou base neuve créée directement avec le nouveau schéma)
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+
+    chantier_id = conn.execute("INSERT INTO chantiers (nom) VALUES (?)", ("Chantier 1",)).lastrowid
+
+    conn.execute(
+        """CREATE TABLE etapes_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            nom             TEXT NOT NULL,
+            description     TEXT DEFAULT '',
+            budget_alloue   REAL DEFAULT 0,
+            ordre           INTEGER DEFAULT 0,
+            date_creation   TEXT DEFAULT (datetime('now')),
+            UNIQUE(chantier_id, nom)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO etapes_new (id, chantier_id, nom, description, budget_alloue, ordre, date_creation)
+           SELECT id, ?, nom, description, budget_alloue, ordre, date_creation FROM etapes""",
+        (chantier_id,),
+    )
+
+    conn.execute(
+        """CREATE TABLE categories_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            chantier_id INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            nom         TEXT NOT NULL,
+            UNIQUE(chantier_id, nom)
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO categories_new (id, chantier_id, nom) SELECT id, ?, nom FROM categories",
+        (chantier_id,),
+    )
+
+    conn.execute(
+        """CREATE TABLE fournisseurs_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            nom             TEXT NOT NULL,
+            telephone       TEXT DEFAULT '',
+            adresse         TEXT DEFAULT '',
+            type_materiaux  TEXT DEFAULT '',
+            solde_initial   REAL DEFAULT 0,
+            date_creation   TEXT DEFAULT (datetime('now')),
+            UNIQUE(chantier_id, nom)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO fournisseurs_new (id, chantier_id, nom, telephone, adresse, type_materiaux,
+                                           solde_initial, date_creation)
+           SELECT id, ?, nom, telephone, adresse, type_materiaux, solde_initial, date_creation
+           FROM fournisseurs""",
+        (chantier_id,),
+    )
+
+    conn.execute(
+        """CREATE TABLE employes_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            nom             TEXT NOT NULL,
+            fonction        TEXT DEFAULT '',
+            telephone       TEXT DEFAULT '',
+            montant_du      REAL DEFAULT 0,
+            date_creation   TEXT DEFAULT (datetime('now')),
+            UNIQUE(chantier_id, nom)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO employes_new (id, chantier_id, nom, fonction, telephone, montant_du, date_creation)
+           SELECT id, ?, nom, fonction, telephone, montant_du, date_creation FROM employes""",
+        (chantier_id,),
+    )
+
+    conn.execute(
+        """CREATE TABLE depenses_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            chantier_id     INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            date            TEXT NOT NULL,
+            designation     TEXT DEFAULT '',
+            categorie_id    INTEGER REFERENCES categories_new(id) ON DELETE SET NULL,
+            etape_id        INTEGER REFERENCES etapes_new(id) ON DELETE SET NULL,
+            fournisseur_id  INTEGER REFERENCES fournisseurs_new(id) ON DELETE SET NULL,
+            employe_id      INTEGER REFERENCES employes_new(id) ON DELETE SET NULL,
+            quantite        REAL DEFAULT 0,
+            prix_unitaire   REAL DEFAULT 0,
+            montant_total   REAL NOT NULL DEFAULT 0,
+            mode_paiement   TEXT DEFAULT '',
+            statut_paiement TEXT DEFAULT 'Payé',
+            observation     TEXT DEFAULT '',
+            justificatif_path TEXT DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO depenses_new (id, chantier_id, date, designation, categorie_id, etape_id,
+                                       fournisseur_id, employe_id, quantite, prix_unitaire, montant_total,
+                                       mode_paiement, statut_paiement, observation, justificatif_path, created_at)
+           SELECT id, ?, date, designation, categorie_id, etape_id, fournisseur_id, employe_id,
+                  quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
+                  justificatif_path, created_at
+           FROM depenses""",
+        (chantier_id,),
+    )
+
+    conn.execute(
+        """CREATE TABLE settings_new (
+            chantier_id INTEGER NOT NULL REFERENCES chantiers(id) ON DELETE CASCADE,
+            key         TEXT NOT NULL,
+            value       TEXT,
+            PRIMARY KEY (chantier_id, key)
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO settings_new (chantier_id, key, value) SELECT ?, key, value FROM settings",
+        (chantier_id,),
+    )
+
+    # `mouvements_employes`/`paiements_fournisseurs` ne changent pas de forme,
+    # mais doivent quand même être recréées : leurs FK actuelles citent
+    # `employes`/`depenses`/`fournisseurs` par leur nom d'origine, qui vont
+    # être supprimés juste après (cf. piège documenté en tête de fonction).
+    conn.execute(
+        """CREATE TABLE mouvements_employes_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            employe_id      INTEGER NOT NULL REFERENCES employes_new(id) ON DELETE CASCADE,
+            date            TEXT NOT NULL,
+            type            TEXT NOT NULL CHECK(type IN ('avance', 'paiement')),
+            montant         REAL NOT NULL DEFAULT 0,
+            commentaire     TEXT DEFAULT '',
+            depense_id      INTEGER REFERENCES depenses_new(id) ON DELETE CASCADE,
+            created_at      TEXT DEFAULT (datetime('now'))
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO mouvements_employes_new (id, employe_id, date, type, montant, commentaire,
+                                                   depense_id, created_at)
+           SELECT id, employe_id, date, type, montant, commentaire, depense_id, created_at
+           FROM mouvements_employes"""
+    )
+
+    conn.execute(
+        """CREATE TABLE paiements_fournisseurs_new (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            fournisseur_id  INTEGER NOT NULL REFERENCES fournisseurs_new(id) ON DELETE CASCADE,
+            date            TEXT NOT NULL,
+            montant         REAL NOT NULL DEFAULT 0,
+            mode_paiement   TEXT DEFAULT '',
+            commentaire     TEXT DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO paiements_fournisseurs_new (id, fournisseur_id, date, montant, mode_paiement,
+                                                      commentaire, created_at)
+           SELECT id, fournisseur_id, date, montant, mode_paiement, commentaire, created_at
+           FROM paiements_fournisseurs"""
+    )
+
+    # Plus rien ne référence les anciennes tables par leur nom `_new` : on
+    # peut les supprimer sans qu'aucune action ON DELETE ne se déclenche
+    # contre les tables `_new` (elles, pointent toutes vers d'autres `_new`).
+    for table in (
+        "mouvements_employes", "paiements_fournisseurs", "depenses",
+        "etapes", "categories", "fournisseurs", "employes", "settings",
+    ):
+        conn.execute(f"DROP TABLE {table}")
+
+    # Renommage final : parents avant enfants, pour que le texte des FK des
+    # tables `_new` pas encore renommées (qui citent encore les noms `_new`
+    # des tables déjà renommées) soit automatiquement mis à jour au passage.
+    for table in (
+        "etapes", "categories", "fournisseurs", "employes", "depenses",
+        "settings", "mouvements_employes", "paiements_fournisseurs",
+    ):
+        conn.execute(f"ALTER TABLE {table}_new RENAME TO {table}")
+
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _seed_chantier_defaults(conn, chantier_id):
+    """Initialise un chantier (nouveau ou tout premier lancement) avec les
+    étapes et catégories par défaut."""
+    conn.executemany(
+        "INSERT INTO etapes (chantier_id, nom, description, ordre) VALUES (?, ?, ?, ?)",
+        [(chantier_id, nom, description, ordre) for nom, description, ordre in DEFAULT_ETAPES],
+    )
+    conn.executemany(
+        "INSERT INTO categories (chantier_id, nom) VALUES (?, ?)",
+        [(chantier_id, c) for c in DEFAULT_CATEGORIES],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers génériques
 # ---------------------------------------------------------------------------
@@ -250,12 +511,76 @@ def _rows_to_dicts(rows):
 
 
 # ---------------------------------------------------------------------------
+# CHANTIERS
+# ---------------------------------------------------------------------------
+
+def get_chantiers():
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM chantiers ORDER BY id").fetchall()
+        return _rows_to_dicts(rows)
+
+
+def get_chantier(chantier_id):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM chantiers WHERE id = ?", (chantier_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def add_chantier(nom, adresse="", description="", statut="En cours"):
+    """Crée un nouveau chantier et l'initialise avec les étapes/catégories
+    par défaut (même logique que le tout premier chantier créé au premier
+    lancement de l'application, voir `init_db`)."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO chantiers (nom, adresse, description, statut) VALUES (?, ?, ?, ?)",
+            (nom, adresse, description, statut),
+        )
+        chantier_id = cur.lastrowid
+        _seed_chantier_defaults(conn, chantier_id)
+        return chantier_id
+
+
+def update_chantier(chantier_id, nom, adresse="", description="", statut="En cours"):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE chantiers SET nom=?, adresse=?, description=?, statut=? WHERE id=?",
+            (nom, adresse, description, statut, chantier_id),
+        )
+
+
+def delete_chantier(chantier_id):
+    """Supprime le chantier et TOUTES ses données (étapes, catégories,
+    fournisseurs, employés, dépenses, paiements, mouvements, réglages) via
+    les contraintes ON DELETE CASCADE. Action irréversible : à confirmer
+    fortement côté interface avant appel."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM chantiers WHERE id = ?", (chantier_id,))
+
+
+def get_totaux_chantiers():
+    """Retourne, pour chaque chantier : nombre de dépenses et montant total dépensé."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.*, COUNT(d.id) AS nb_depenses, COALESCE(SUM(d.montant_total), 0) AS total_depenses
+            FROM chantiers c
+            LEFT JOIN depenses d ON d.chantier_id = c.id
+            GROUP BY c.id
+            ORDER BY c.id
+            """
+        ).fetchall()
+        return _rows_to_dicts(rows)
+
+
+# ---------------------------------------------------------------------------
 # ÉTAPES
 # ---------------------------------------------------------------------------
 
-def get_etapes():
+def get_etapes(chantier_id):
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM etapes ORDER BY ordre, id").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM etapes WHERE chantier_id = ? ORDER BY ordre, id", (chantier_id,)
+        ).fetchall()
         return _rows_to_dicts(rows)
 
 
@@ -265,13 +590,17 @@ def get_etape(etape_id):
         return dict(row) if row else None
 
 
-def add_etape(nom, description="", budget_alloue=0, ordre=None):
+def add_etape(chantier_id, nom, description="", budget_alloue=0, ordre=None):
     with get_connection() as conn:
         if ordre is None:
-            ordre = (conn.execute("SELECT COALESCE(MAX(ordre), 0) FROM etapes").fetchone()[0] or 0) + 1
+            ordre = (
+                conn.execute(
+                    "SELECT COALESCE(MAX(ordre), 0) FROM etapes WHERE chantier_id = ?", (chantier_id,)
+                ).fetchone()[0] or 0
+            ) + 1
         cur = conn.execute(
-            "INSERT INTO etapes (nom, description, budget_alloue, ordre) VALUES (?, ?, ?, ?)",
-            (nom, description, budget_alloue, ordre),
+            "INSERT INTO etapes (chantier_id, nom, description, budget_alloue, ordre) VALUES (?, ?, ?, ?, ?)",
+            (chantier_id, nom, description, budget_alloue, ordre),
         )
         return cur.lastrowid
 
@@ -291,8 +620,9 @@ def delete_etape(etape_id):
         conn.execute("DELETE FROM etapes WHERE id = ?", (etape_id,))
 
 
-def get_couts_par_etape():
-    """Retourne, pour chaque étape, le coût total des dépenses liées et le % du budget consommé."""
+def get_couts_par_etape(chantier_id):
+    """Retourne, pour chaque étape du chantier, le coût total des dépenses liées
+    et le % du budget consommé."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -301,9 +631,11 @@ def get_couts_par_etape():
                    COUNT(d.id) AS nb_depenses
             FROM etapes e
             LEFT JOIN depenses d ON d.etape_id = e.id
+            WHERE e.chantier_id = ?
             GROUP BY e.id
             ORDER BY e.ordre, e.id
-            """
+            """,
+            (chantier_id,),
         ).fetchall()
         result = []
         for r in rows:
@@ -314,41 +646,74 @@ def get_couts_par_etape():
         return result
 
 
+def get_cout_etape(etape_id):
+    """Équivalent de `get_couts_par_etape` pour une seule étape (déjà identifiée
+    par son id, donc sans besoin de `chantier_id`). Retourne `None` si l'étape
+    n'existe pas/plus."""
+    with get_connection() as conn:
+        r = conn.execute(
+            """
+            SELECT e.id, e.nom, e.description, e.budget_alloue,
+                   COALESCE(SUM(d.montant_total), 0) AS cout_total,
+                   COUNT(d.id) AS nb_depenses
+            FROM etapes e
+            LEFT JOIN depenses d ON d.etape_id = e.id
+            WHERE e.id = ?
+            GROUP BY e.id
+            """,
+            (etape_id,),
+        ).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        budget = d["budget_alloue"] or 0
+        d["pct_budget"] = round((d["cout_total"] / budget) * 100, 1) if budget > 0 else None
+        return d
+
+
 # ---------------------------------------------------------------------------
 # CATÉGORIES
 # ---------------------------------------------------------------------------
 
-def get_categories():
+def get_categories(chantier_id):
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM categories ORDER BY nom").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM categories WHERE chantier_id = ? ORDER BY nom", (chantier_id,)
+        ).fetchall()
         return _rows_to_dicts(rows)
 
 
-def get_categorie_by_nom(nom):
+def get_categorie_by_nom(chantier_id, nom):
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM categories WHERE nom = ?", (nom,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM categories WHERE chantier_id = ? AND nom = ?", (chantier_id, nom)
+        ).fetchone()
         return dict(row) if row else None
 
 
-def add_categorie(nom):
+def add_categorie(chantier_id, nom):
     with get_connection() as conn:
-        cur = conn.execute("INSERT OR IGNORE INTO categories (nom) VALUES (?)", (nom,))
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO categories (chantier_id, nom) VALUES (?, ?)", (chantier_id, nom)
+        )
         if cur.lastrowid and cur.rowcount:
             return cur.lastrowid
-        row = conn.execute("SELECT id FROM categories WHERE nom = ?", (nom,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM categories WHERE chantier_id = ? AND nom = ?", (chantier_id, nom)
+        ).fetchone()
         return row["id"] if row else None
 
 
-def get_or_create_categorie(nom):
-    """Retourne l'id de la catégorie `nom`, en la créant si besoin (mêmes pattern
-    que `get_or_create_fournisseur`/`get_or_create_employe`)."""
+def get_or_create_categorie(chantier_id, nom):
+    """Retourne l'id de la catégorie `nom` pour ce chantier, en la créant si besoin
+    (même pattern que `get_or_create_fournisseur`/`get_or_create_employe`)."""
     nom = (nom or "").strip()
     if not nom:
         return None
-    existing = get_categorie_by_nom(nom)
+    existing = get_categorie_by_nom(chantier_id, nom)
     if existing:
         return existing["id"]
-    return add_categorie(nom)
+    return add_categorie(chantier_id, nom)
 
 
 def update_categorie(categorie_id, nom):
@@ -365,8 +730,9 @@ def delete_categorie(categorie_id):
         conn.execute("DELETE FROM categories WHERE id = ?", (categorie_id,))
 
 
-def get_totaux_categories():
-    """Retourne, pour chaque catégorie, le nombre de dépenses liées et le montant total dépensé."""
+def get_totaux_categories(chantier_id):
+    """Retourne, pour chaque catégorie du chantier, le nombre de dépenses liées
+    et le montant total dépensé."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -375,9 +741,11 @@ def get_totaux_categories():
                    COALESCE(SUM(d.montant_total), 0) AS montant_total
             FROM categories c
             LEFT JOIN depenses d ON d.categorie_id = c.id
+            WHERE c.chantier_id = ?
             GROUP BY c.id
             ORDER BY c.nom
-            """
+            """,
+            (chantier_id,),
         ).fetchall()
         return _rows_to_dicts(rows)
 
@@ -386,9 +754,11 @@ def get_totaux_categories():
 # FOURNISSEURS
 # ---------------------------------------------------------------------------
 
-def get_fournisseurs():
+def get_fournisseurs(chantier_id):
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM fournisseurs ORDER BY nom").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM fournisseurs WHERE chantier_id = ? ORDER BY nom", (chantier_id,)
+        ).fetchall()
         return _rows_to_dicts(rows)
 
 
@@ -398,31 +768,34 @@ def get_fournisseur(fournisseur_id):
         return dict(row) if row else None
 
 
-def get_fournisseur_by_nom(nom):
+def get_fournisseur_by_nom(chantier_id, nom):
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM fournisseurs WHERE nom = ?", (nom,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM fournisseurs WHERE chantier_id = ? AND nom = ?", (chantier_id, nom)
+        ).fetchone()
         return dict(row) if row else None
 
 
-def add_fournisseur(nom, telephone="", adresse="", type_materiaux="", solde_initial=0):
+def add_fournisseur(chantier_id, nom, telephone="", adresse="", type_materiaux="", solde_initial=0):
     with get_connection() as conn:
         cur = conn.execute(
-            """INSERT INTO fournisseurs (nom, telephone, adresse, type_materiaux, solde_initial)
-               VALUES (?, ?, ?, ?, ?)""",
-            (nom, telephone, adresse, type_materiaux, solde_initial),
+            """INSERT INTO fournisseurs (chantier_id, nom, telephone, adresse, type_materiaux, solde_initial)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (chantier_id, nom, telephone, adresse, type_materiaux, solde_initial),
         )
         return cur.lastrowid
 
 
-def get_or_create_fournisseur(nom):
-    """Retourne l'id du fournisseur `nom`, en le créant s'il n'existe pas encore (utile à l'import)."""
+def get_or_create_fournisseur(chantier_id, nom):
+    """Retourne l'id du fournisseur `nom` pour ce chantier, en le créant s'il
+    n'existe pas encore (utile à l'import)."""
     nom = (nom or "").strip()
     if not nom:
         return None
-    existing = get_fournisseur_by_nom(nom)
+    existing = get_fournisseur_by_nom(chantier_id, nom)
     if existing:
         return existing["id"]
-    return add_fournisseur(nom)
+    return add_fournisseur(chantier_id, nom)
 
 
 def update_fournisseur(fournisseur_id, nom, telephone="", adresse="", type_materiaux="", solde_initial=0):
@@ -468,8 +841,9 @@ def get_achats_fournisseur(fournisseur_id):
         return _rows_to_dicts(rows)
 
 
-def get_dettes_fournisseurs():
-    """Calcule, pour chaque fournisseur : total achats, total payé et dette restante.
+def get_dettes_fournisseurs(chantier_id):
+    """Calcule, pour chaque fournisseur du chantier : total achats, total payé
+    et dette restante.
 
     Dette restante = solde_initial + total des achats (dépenses) - total des paiements enregistrés.
     """
@@ -480,8 +854,10 @@ def get_dettes_fournisseurs():
                    COALESCE((SELECT SUM(d.montant_total) FROM depenses d WHERE d.fournisseur_id = f.id), 0) AS total_achats,
                    COALESCE((SELECT SUM(p.montant) FROM paiements_fournisseurs p WHERE p.fournisseur_id = f.id), 0) AS total_paye
             FROM fournisseurs f
+            WHERE f.chantier_id = ?
             ORDER BY f.nom
-            """
+            """,
+            (chantier_id,),
         ).fetchall()
         result = []
         for r in rows:
@@ -495,9 +871,11 @@ def get_dettes_fournisseurs():
 # EMPLOYÉS
 # ---------------------------------------------------------------------------
 
-def get_employes():
+def get_employes(chantier_id):
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM employes ORDER BY nom").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM employes WHERE chantier_id = ? ORDER BY nom", (chantier_id,)
+        ).fetchall()
         return _rows_to_dicts(rows)
 
 
@@ -507,29 +885,31 @@ def get_employe(employe_id):
         return dict(row) if row else None
 
 
-def get_employe_by_nom(nom):
+def get_employe_by_nom(chantier_id, nom):
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM employes WHERE nom = ?", (nom,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM employes WHERE chantier_id = ? AND nom = ?", (chantier_id, nom)
+        ).fetchone()
         return dict(row) if row else None
 
 
-def add_employe(nom, fonction="", telephone="", montant_du=0):
+def add_employe(chantier_id, nom, fonction="", telephone="", montant_du=0):
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO employes (nom, fonction, telephone, montant_du) VALUES (?, ?, ?, ?)",
-            (nom, fonction, telephone, montant_du),
+            "INSERT INTO employes (chantier_id, nom, fonction, telephone, montant_du) VALUES (?, ?, ?, ?, ?)",
+            (chantier_id, nom, fonction, telephone, montant_du),
         )
         return cur.lastrowid
 
 
-def get_or_create_employe(nom, fonction=""):
+def get_or_create_employe(chantier_id, nom, fonction=""):
     nom = (nom or "").strip()
     if not nom:
         return None
-    existing = get_employe_by_nom(nom)
+    existing = get_employe_by_nom(chantier_id, nom)
     if existing:
         return existing["id"]
-    return add_employe(nom, fonction=fonction)
+    return add_employe(chantier_id, nom, fonction=fonction)
 
 
 def update_employe(employe_id, nom, fonction="", telephone="", montant_du=0):
@@ -594,8 +974,8 @@ def delete_mouvement_employe(mouvement_id):
         conn.execute("DELETE FROM mouvements_employes WHERE id = ? AND depense_id IS NULL", (mouvement_id,))
 
 
-def get_totaux_employes():
-    """Calcule pour chaque employé : total dû, total avancé, total payé, reste à payer."""
+def get_totaux_employes(chantier_id):
+    """Calcule pour chaque employé du chantier : total dû, total avancé, total payé, reste à payer."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -605,8 +985,10 @@ def get_totaux_employes():
                    COALESCE((SELECT SUM(m.montant) FROM mouvements_employes m
                              WHERE m.employe_id = e.id AND m.type = 'paiement'), 0) AS total_paye
             FROM employes e
+            WHERE e.chantier_id = ?
             ORDER BY e.nom
-            """
+            """,
+            (chantier_id,),
         ).fetchall()
         result = []
         for r in rows:
@@ -618,11 +1000,27 @@ def get_totaux_employes():
 
 
 def get_totaux_employe(employe_id):
-    totaux = get_totaux_employes()
-    for t in totaux:
-        if t["id"] == employe_id:
-            return t
-    return None
+    """Équivalent de `get_totaux_employes` pour un seul employé (déjà identifié
+    par son id, donc sans besoin de `chantier_id`)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT e.id, e.nom, e.fonction, e.telephone, e.montant_du,
+                   COALESCE((SELECT SUM(m.montant) FROM mouvements_employes m
+                             WHERE m.employe_id = e.id AND m.type = 'avance'), 0) AS total_avance,
+                   COALESCE((SELECT SUM(m.montant) FROM mouvements_employes m
+                             WHERE m.employe_id = e.id AND m.type = 'paiement'), 0) AS total_paye
+            FROM employes e
+            WHERE e.id = ?
+            """,
+            (employe_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["total_regle"] = round(d["total_avance"] + d["total_paye"], 2)
+        d["reste_a_payer"] = round(d["montant_du"] - d["total_regle"], 2)
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -639,9 +1037,11 @@ DEPENSE_SELECT = """
 """
 
 
-def get_depenses():
+def get_depenses(chantier_id):
     with get_connection() as conn:
-        rows = conn.execute(DEPENSE_SELECT + " ORDER BY d.date DESC, d.id DESC").fetchall()
+        rows = conn.execute(
+            DEPENSE_SELECT + " WHERE d.chantier_id = ? ORDER BY d.date DESC, d.id DESC", (chantier_id,)
+        ).fetchall()
         return _rows_to_dicts(rows)
 
 
@@ -651,7 +1051,7 @@ def get_depense(depense_id):
         return dict(row) if row else None
 
 
-def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
+def add_depense(chantier_id, date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
                  quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
                  justificatif_path=""):
     """Ajoute une dépense et déclenche automatiquement le mouvement d'employé associé
@@ -665,11 +1065,11 @@ def add_depense(date_depense, designation, categorie_id, etape_id, fournisseur_i
     with get_connection() as conn:
         cur = conn.execute(
             """INSERT INTO depenses
-               (date, designation, categorie_id, etape_id, fournisseur_id, employe_id,
+               (chantier_id, date, designation, categorie_id, etape_id, fournisseur_id, employe_id,
                 quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
                 justificatif_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (chantier_id, date_depense, designation, categorie_id, etape_id, fournisseur_id, employe_id,
              quantite, prix_unitaire, montant_total, mode_paiement, statut_paiement, observation,
              justificatif_path),
         )
@@ -725,27 +1125,37 @@ def delete_depense(depense_id):
 # INDICATEURS GLOBAUX (tableau de bord)
 # ---------------------------------------------------------------------------
 
-def get_indicateurs_globaux():
+def get_indicateurs_globaux(chantier_id):
     with get_connection() as conn:
-        total_depenses = conn.execute("SELECT COALESCE(SUM(montant_total), 0) FROM depenses").fetchone()[0]
-        nb_depenses = conn.execute("SELECT COUNT(*) FROM depenses").fetchone()[0]
-        nb_fournisseurs = conn.execute("SELECT COUNT(*) FROM fournisseurs").fetchone()[0]
-        nb_employes = conn.execute("SELECT COUNT(*) FROM employes").fetchone()[0]
-        budget_row = conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone()
+        total_depenses = conn.execute(
+            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE chantier_id = ?", (chantier_id,)
+        ).fetchone()[0]
+        nb_depenses = conn.execute(
+            "SELECT COUNT(*) FROM depenses WHERE chantier_id = ?", (chantier_id,)
+        ).fetchone()[0]
+        nb_fournisseurs = conn.execute(
+            "SELECT COUNT(*) FROM fournisseurs WHERE chantier_id = ?", (chantier_id,)
+        ).fetchone()[0]
+        nb_employes = conn.execute(
+            "SELECT COUNT(*) FROM employes WHERE chantier_id = ?", (chantier_id,)
+        ).fetchone()[0]
+        budget_row = conn.execute(
+            "SELECT value FROM settings WHERE chantier_id = ? AND key = 'budget_global'", (chantier_id,)
+        ).fetchone()
         budget_global = float(budget_row[0]) if budget_row and budget_row[0] else 0
 
         mois_courant = _today()[:7]     # "YYYY-MM"
         annee_courante = _today()[:4]   # "YYYY"
         depenses_mois_courant = conn.execute(
-            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE strftime('%Y-%m', date) = ?",
-            (mois_courant,),
+            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE chantier_id = ? AND strftime('%Y-%m', date) = ?",
+            (chantier_id, mois_courant),
         ).fetchone()[0]
         depenses_annee_courante = conn.execute(
-            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE strftime('%Y', date) = ?",
-            (annee_courante,),
+            "SELECT COALESCE(SUM(montant_total), 0) FROM depenses WHERE chantier_id = ? AND strftime('%Y', date) = ?",
+            (chantier_id, annee_courante),
         ).fetchone()[0]
 
-    dettes = get_dettes_fournisseurs()
+    dettes = get_dettes_fournisseurs(chantier_id)
     total_dettes = round(sum(d["dette_restante"] for d in dettes), 2)
     total_achats_fournisseurs = round(sum(d["total_achats"] for d in dettes), 2)
     total_paye_fournisseurs = round(sum(d["total_paye"] for d in dettes), 2)
@@ -768,18 +1178,20 @@ def get_indicateurs_globaux():
     }
 
 
-def get_budget_global():
+def get_budget_global(chantier_id):
     with get_connection() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'budget_global'").fetchone()
+        row = conn.execute(
+            "SELECT value FROM settings WHERE chantier_id = ? AND key = 'budget_global'", (chantier_id,)
+        ).fetchone()
         return float(row[0]) if row and row[0] else 0.0
 
 
-def set_budget_global(montant):
+def set_budget_global(chantier_id, montant):
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('budget_global', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (str(montant),),
+            "INSERT INTO settings (chantier_id, key, value) VALUES (?, 'budget_global', ?) "
+            "ON CONFLICT(chantier_id, key) DO UPDATE SET value = excluded.value",
+            (chantier_id, str(montant)),
         )
 
 
@@ -787,8 +1199,8 @@ def set_budget_global(montant):
 # HISTORIQUE DES PAIEMENTS (fournisseurs + employés confondus)
 # ---------------------------------------------------------------------------
 
-def get_historique_paiements():
-    """Retourne la liste unifiée de tous les paiements (fournisseurs et employés)."""
+def get_historique_paiements(chantier_id):
+    """Retourne la liste unifiée de tous les paiements du chantier (fournisseurs et employés)."""
     with get_connection() as conn:
         rows_f = conn.execute(
             """
@@ -796,7 +1208,9 @@ def get_historique_paiements():
                    p.mode_paiement, p.commentaire
             FROM paiements_fournisseurs p
             JOIN fournisseurs f ON f.id = p.fournisseur_id
-            """
+            WHERE f.chantier_id = ?
+            """,
+            (chantier_id,),
         ).fetchall()
         rows_e = conn.execute(
             """
@@ -805,7 +1219,9 @@ def get_historique_paiements():
                    '' AS mode_paiement, m.commentaire
             FROM mouvements_employes m
             JOIN employes e ON e.id = m.employe_id
-            """
+            WHERE e.chantier_id = ?
+            """,
+            (chantier_id,),
         ).fetchall()
 
     historique = _rows_to_dicts(rows_f) + _rows_to_dicts(rows_e)

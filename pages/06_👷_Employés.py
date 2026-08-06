@@ -23,6 +23,7 @@ from utils.helpers import (
     MODES_PAIEMENT,
     STATUTS_PAIEMENT as STATUTS,
     bottom_nav_mobile,
+    chantier_selector,
     confirm_delete,
     enregistrer_justificatif,
     flash,
@@ -39,6 +40,7 @@ db.init_db()
 inject_custom_css()
 inject_pwa_head()
 render_flash()
+chantier_id = chantier_selector()
 section_title("Gestion des employés", "👷")
 
 
@@ -113,10 +115,10 @@ with st.expander("➕ Ajouter un nouvel employé", expanded=False):
         if st.form_submit_button("💾 Ajouter l'employé", width="stretch", type="primary"):
             if not nom.strip():
                 st.error("Le nom est obligatoire.")
-            elif db.get_employe_by_nom(nom.strip()):
+            elif db.get_employe_by_nom(chantier_id, nom.strip()):
                 st.error("Un employé porte déjà ce nom.")
             else:
-                db.add_employe(nom.strip(), fonction.strip(), telephone.strip(), montant_du)
+                db.add_employe(chantier_id, nom.strip(), fonction.strip(), telephone.strip(), montant_du)
                 st.success(f"Employé « {nom} » ajouté.")
                 st.rerun()
 
@@ -126,7 +128,7 @@ st.divider()
 # Liste des employés
 # ---------------------------------------------------------------------------
 section_title("Liste des employés", "📋")
-totaux = db.get_totaux_employes()
+totaux = db.get_totaux_employes(chantier_id)
 
 if not totaux:
     st.info("Aucun employé enregistré pour le moment.")
@@ -146,7 +148,7 @@ st.divider()
 # Fiche employé
 # ---------------------------------------------------------------------------
 section_title("Fiche employé", "🪪")
-employes = db.get_employes()
+employes = db.get_employes(chantier_id)
 
 if not employes:
     st.info("Ajoutez un employé pour consulter sa fiche.")
@@ -213,7 +215,7 @@ else:
                             dialog_supprimer_mouvement(m["id"])
 
     with tab_depense:
-        etapes = db.get_etapes()
+        etapes = db.get_etapes(chantier_id)
         if not etapes:
             st.warning("Créez d'abord au moins une étape sur la page **Étapes**.")
         else:
@@ -246,9 +248,10 @@ else:
                         st.error("Le montant doit être supérieur à 0.")
                     else:
                         etape_id = next(e2["id"] for e2 in etapes if e2["nom"] == d_etape_nom)
-                        categorie_id = db.get_or_create_categorie("Employé")
+                        categorie_id = db.get_or_create_categorie(chantier_id, "Employé")
                         justificatif_path = enregistrer_justificatif(d_fichier or d_photo, prefixe="depense_employe")
                         db.add_depense(
+                            chantier_id=chantier_id,
                             date_depense=d_date.isoformat(),
                             designation=d_designation.strip(),
                             categorie_id=categorie_id,
