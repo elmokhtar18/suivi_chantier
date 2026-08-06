@@ -572,6 +572,50 @@ def get_totaux_chantiers():
         return _rows_to_dicts(rows)
 
 
+def get_indicateurs_tous_chantiers():
+    """Version agrégée, tous chantiers confondus, des indicateurs clés :
+    montant total des dépenses, dettes fournisseurs et situation des
+    employés (montant dû, réglé, reste à payer). Utilisée pour la vue
+    d'ensemble multi-chantiers du tableau de bord principal — mêmes formules
+    que `get_dettes_fournisseurs`/`get_totaux_employes`, simplement sans le
+    filtre `chantier_id`."""
+    with get_connection() as conn:
+        total_depenses = conn.execute("SELECT COALESCE(SUM(montant_total), 0) FROM depenses").fetchone()[0]
+
+        rows_f = conn.execute(
+            """
+            SELECT f.solde_initial,
+                   COALESCE((SELECT SUM(d.montant_total) FROM depenses d WHERE d.fournisseur_id = f.id), 0) AS total_achats,
+                   COALESCE((SELECT SUM(p.montant) FROM paiements_fournisseurs p WHERE p.fournisseur_id = f.id), 0) AS total_paye
+            FROM fournisseurs f
+            """
+        ).fetchall()
+        total_dettes_fournisseurs = round(
+            sum(r["solde_initial"] + r["total_achats"] - r["total_paye"] for r in rows_f), 2
+        )
+
+        rows_e = conn.execute(
+            """
+            SELECT e.montant_du,
+                   COALESCE((SELECT SUM(m.montant) FROM mouvements_employes m
+                             WHERE m.employe_id = e.id AND m.type = 'avance'), 0) AS total_avance,
+                   COALESCE((SELECT SUM(m.montant) FROM mouvements_employes m
+                             WHERE m.employe_id = e.id AND m.type = 'paiement'), 0) AS total_paye
+            FROM employes e
+            """
+        ).fetchall()
+        total_du_employes = round(sum(r["montant_du"] for r in rows_e), 2)
+        total_regle_employes = round(sum(r["total_avance"] + r["total_paye"] for r in rows_e), 2)
+
+    return {
+        "total_depenses": total_depenses,
+        "total_dettes_fournisseurs": total_dettes_fournisseurs,
+        "total_du_employes": total_du_employes,
+        "total_regle_employes": total_regle_employes,
+        "reste_a_payer_employes": round(total_du_employes - total_regle_employes, 2),
+    }
+
+
 # ---------------------------------------------------------------------------
 # ÉTAPES
 # ---------------------------------------------------------------------------

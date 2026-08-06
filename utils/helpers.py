@@ -213,6 +213,22 @@ def inject_custom_css():
             background-color: {BG_SURFACE}; border-right: 1px solid {BORDER};
         }}
 
+        /* Le sélecteur de "chantier actif" (posé par chaque page via
+           st.sidebar, donc dans stSidebarUserContent) doit apparaître
+           au-dessus du menu de navigation généré automatiquement par
+           Streamlit (stSidebarNav), pas en dessous comme c'est le cas par
+           défaut (ordre naturel : header, nav, puis contenu ajouté par la
+           page). stSidebarContent est display:block par défaut — on le passe
+           en flex-column pour que `order` puisse réordonner ses 3 enfants
+           directs sans toucher à leur contenu. */
+        [data-testid="stSidebarContent"] {{
+            display: flex !important;
+            flex-direction: column !important;
+        }}
+        [data-testid="stSidebarHeader"] {{order: 1;}}
+        [data-testid="stSidebarUserContent"] {{order: 2;}}
+        [data-testid="stSidebarNav"] {{order: 3;}}
+
         /* ---- Métriques natives Streamlit ---- */
         div[data-testid="stMetric"] {{
             background: {BG_SURFACE}; border: 1px solid {BORDER}; border-radius: 16px;

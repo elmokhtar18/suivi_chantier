@@ -80,13 +80,35 @@ with st.sidebar:
                "Paiements, Statistiques, Recherche et Import/Export.")
 
 # ---------------------------------------------------------------------------
-# Indicateurs globaux
+# Vue d'ensemble : tous les chantiers confondus
+# ---------------------------------------------------------------------------
+ind_globaux = db.get_indicateurs_tous_chantiers()
+
+section_title("Vue d'ensemble — tous les chantiers", "🌍")
+g1, g2, g3, g4 = st.columns(4)
+with g1:
+    kpi_card("💰", "Total dépenses (tous chantiers)", format_montant(ind_globaux["total_depenses"]))
+with g2:
+    kpi_card("📉", "Dettes fournisseurs", format_montant(ind_globaux["total_dettes_fournisseurs"]),
+              STATUS_CRITICAL, STATUS_CRITICAL)
+with g3:
+    kpi_card("✅", "Avancé / payé aux employés", format_montant(ind_globaux["total_regle_employes"]),
+              STATUS_GOOD, STATUS_GOOD)
+with g4:
+    kpi_card("⏳", "Reste à payer aux employés", format_montant(ind_globaux["reste_a_payer_employes"]),
+              STATUS_WARNING, STATUS_WARNING)
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Indicateurs du chantier actif
 # ---------------------------------------------------------------------------
 ind = db.get_indicateurs_globaux(chantier_id)
 depenses = db.get_depenses(chantier_id)
 df = pd.DataFrame(depenses)
+nom_chantier_actif = db.get_chantier(chantier_id)["nom"]
 
-section_title("Tableau de bord principal", "📊")
+section_title(f"Tableau de bord — {nom_chantier_actif}", "📊")
 st.caption("Cliquez sur « 🔍 Voir le détail », ou sur une ligne des tableaux "
            "ci-dessous, pour explorer les dépenses correspondantes.")
 
